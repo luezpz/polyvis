@@ -16,17 +16,18 @@ Status legend: [x] done · [ ] todo · (n/a) not meaningful in that dimension.
 - [x] Docs: AGENTS.md, PLAN.md, PROGRESS.md, README, ALGORITHMS index.
 
 ## Phase 2: Core parity (2D catches up with 3D)
-2D now computes leaf surfaces and the shared PVS row table (shared pipeline) but does not use them yet.
-- [ ] 2D export v2: shared PVS rows (`leaf.pvs` row index), per-leaf wall lists, `walls` array,
+- [x] 2D export v2: shared PVS rows (`leaf.pvs` row index), per-leaf wall lists, `walls` array,
       `decodeLeafPvs`; bump `polyvis-pvs-2d` to version 2; port the 3D export tests.
-- [ ] 2D `analysis`: `castRay` / `lineOfSight` in core (now only in `tests/d2/helpers.ts`),
+- [x] 2D `analysis`: `castRay` / `lineOfSight` in core (now only in `tests/d2/helpers.ts`),
       same API as 3D; 3D could gain a visibility "polygon" analogue only if useful (n/a likely).
-- [ ] Port 3D tests missing from 2D: "assigns every bit of wall area to exactly one empty leaf",
+- [x] Port 3D tests missing from 2D: "assigns every bit of wall area to exactly one empty leaf",
       "orients portals into their destination leaf", "truncated flow falls back to base vis",
       "flow strictly tighter somewhere", the shared-rows suite, the separators test.
-- [ ] 2D raw-wall import (3D has OBJ): e.g. polyline/SVG-path import → walls, leaks reported.
-      Decide format with the user before building.
+- (n/a) 2D raw-wall import (3D has OBJ): dropped by user decision (2026-11-15); 2D stays
+      brush-only. `compileWalls` still accepts raw walls programmatically.
 - [ ] Unify `makeWall` and the CSG `EmptySpaceTest`/classification helpers where shapes match.
+      (Deferred: they are 5-line functions over different primitives; sharing needs new
+      `Geometry` ops for little gain.)
 
 ## Phase 3: Shared app infrastructure
 Pure, dimension-agnostic app code that is currently duplicated or 3D-only:

@@ -2,6 +2,25 @@
 
 Newest first. One entry per session; say what changed, what was verified, what is next.
 
+## 2026-11-15: Session 2, Phase 2 core parity
+
+Done
+- 2D export v2 (`polyvis-pvs-2d` 2): shared PVS rows (`leaf.pvs`), top-level `walls`, per-leaf
+  wall lists, `decodeLeafPvs`. Text leaf line: `<contents> <pvsRow> <nwalls> <wall>... <nverts> <x y>...`.
+  3D: already had it.
+- 2D `castRay` / `lineOfSight` in `d2/core/analysis/visibility.ts` (same API as 3D);
+  `tests/d2/helpers.ts` no longer defines `lineOfSight`.
+- Ported 3D tests to 2D: portal orientation, wall length assigned to leaves, flow strictly
+  tighter, truncated flow, shared-rows suite, separators, export v2; plus a 2D `castRay` test.
+
+Verified
+- `npm run typecheck` clean; `npm test`: 8 files, 97 tests pass.
+- NOT verified in a browser (2D export button only downloads the new document).
+
+Next
+- 2D raw-wall import dropped (user decision); Phase 2 otherwise done. Next: Phase 3.
+- `makeWall`/`EmptySpaceTest` unification deferred (see PLAN.md).
+
 ## 2026-11-15: Session 1, merge + shared core
 
 Done

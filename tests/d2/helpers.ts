@@ -1,8 +1,8 @@
 /** Shared test utilities. */
 
 import {
-  type Brush, type BrushKind, type Level, type Vec2, type Wall, type CompileResult,
-  LEVEL_FORMAT, LEVEL_VERSION, makeBoxBrush, segmentIntersection, locateLeaf, convexContains,
+  type Brush, type BrushKind, type Level, type Vec2, type CompileResult,
+  LEVEL_FORMAT, LEVEL_VERSION, makeBoxBrush, locateLeaf, convexContains,
 } from "../../src/d2/core";
 
 /** Deterministic PRNG (mulberry32). */
@@ -42,11 +42,6 @@ export function randomLevel(seed: number, roomCount = 8): Level {
     boxes.push(["solid", sx, sy, sx + 1, sy + 1]);
   }
   return boxLevel(boxes);
-}
-
-/** True if the open segment p→q does not touch any wall. */
-export function lineOfSight(walls: readonly Wall[], p: Vec2, q: Vec2): boolean {
-  return !walls.some((w) => segmentIntersection(p, q, w.winding.a, w.winding.b, 1e-6) !== null);
 }
 
 /** Random point uniformly inside a leaf's convex region (rejection sampling in its AABB). */

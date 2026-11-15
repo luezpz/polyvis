@@ -10,10 +10,13 @@
  * Runtime usage in an engine:
  *   1. Walk the BSP from the root with the camera position to find its leaf
  *      (front if `dot(n, p) - d >= 0`, else back; negative refs are leaves).
- *   2. Decode that leaf's PVS row; draw only objects in visible leaves.
+ *   2. Read that leaf's PVS row, `rows[leaf.pvs]`; draw only the walls /
+ *      objects in visible leaves (each leaf lists the walls that bound it,
+ *      Quake "marksurfaces").
  *
- * PVS rows: bit `j` of row `i` set ⇔ leaf `j` is potentially visible from
- * leaf `i`. Hex, two characters per byte, bit `j` in byte `j >> 3` at bit
+ * PVS rows are **shared**: identical rows are stored once and each leaf holds
+ * an index into the row table (version 2; see `vis/pvsTable.ts`). Bit `j` of
+ * a row set ⇔ leaf `j` is potentially visible. Hex, two characters per byte, bit `j` in byte `j >> 3` at bit
  * position `j & 7` (LSB first).
  */
 
@@ -22,7 +25,7 @@ import type { CompileResult } from "../pipeline";
 import type { Vec2 } from "../math";
 
 export const PVS_FORMAT = "polyvis-pvs-2d";
-export const PVS_VERSION = 1;
+export const PVS_VERSION = 2;
 
 type P2 = [number, number];
 const p2 = (v: Vec2): P2 => [round(v.x), round(v.y)];
@@ -37,19 +40,28 @@ export interface PvsDocument {
   /** `[plane, frontRef, backRef]`; refs `>= 0` are nodes, `< 0` are leaf `-ref - 1`. */
   readonly nodes: readonly [number, number, number][];
   readonly root: number;
+  /** CSG walls `[a, b]`: empty space on the left of a→b. */
+  readonly walls: readonly { readonly a: P2; readonly b: P2 }[];
   readonly leaves: readonly {
     readonly contents: "empty" | "solid";
     /** Convex CCW polygon, or null for degenerate leaves. */
     readonly polygon: readonly P2[] | null;
+    /** Index of this leaf's row in `pvs.rows`. */
+    readonly pvs: number;
     /** Ids of portals leading out of this leaf. */
     readonly portals: readonly number[];
+    /** Indices of walls with a piece bounding this leaf. */
+    readonly walls: readonly number[];
   }[];
+  /** Directed portals; `to` lies on the left of a→b. */
   readonly portals: readonly { readonly from: number; readonly to: number; readonly a: P2; readonly b: P2 }[];
+  /** Distinct PVS rows, each `ceil(leafCount / 8)` bytes. */
   readonly pvs: { readonly encoding: "hex-lsb"; readonly rows: readonly string[] };
 }
 
+/** Converts a compile result to the export document (coordinates rounded to 1e-6). */
 export function buildPvsDocument(result: CompileResult): PvsDocument {
-  const { tree, graph, pvs } = result;
+  const { tree, graph, pvsTable, surfaces } = result;
   return {
     format: PVS_FORMAT,
     version: PVS_VERSION,
@@ -57,35 +69,43 @@ export function buildPvsDocument(result: CompileResult): PvsDocument {
     planes: tree.planes.map((l) => [round(l.n.x), round(l.n.y), round(l.d)]),
     nodes: tree.nodes.map((n) => [n.plane, n.front, n.back]),
     root: tree.root,
+    walls: result.walls.map((w) => ({ a: p2(w.winding.a), b: p2(w.winding.b) })),
     leaves: tree.leaves.map((l, i) => ({
       contents: l.contents,
       polygon: l.region ? l.region.vertices.map(p2) : null,
+      pvs: pvsTable.leafRow[i],
       portals: [...graph.portalsFrom[i]],
+      walls: [...new Set(surfaces[i].map((x) => x.wall))].sort((a, b) => a - b),
     })),
     portals: graph.portals.map((p) => ({ from: p.from, to: p.to, a: p2(p.winding.a), b: p2(p.winding.b) })),
-    pvs: { encoding: "hex-lsb", rows: pvs.map((r) => r.toHex()) },
+    pvs: { encoding: "hex-lsb", rows: pvsTable.rows.map((r) => r.toHex()) },
   };
 }
 
+/** JSON encoding of {@link buildPvsDocument}. */
 export const exportPvsJson = (result: CompileResult): string => JSON.stringify(buildPvsDocument(result));
 
 /**
  * Line-oriented text format:
  *
  * ```
- * polyvis-pvs-2d 1
+ * polyvis-pvs-2d 2
  * bounds <minx> <miny> <maxx> <maxy>
  * planes <count>
  * <nx> <ny> <d>                       (× count)
  * nodes <count> root <ref>
  * <plane> <front> <back>              (× count)
+ * walls <count>
+ * <ax> <ay> <bx> <by>                 (× count)
  * leaves <count>
- * <empty|solid> <nverts> <x y>...     (× count; nverts may be 0)
+ * <empty|solid> <pvsRow> <nwalls> <wall>... <nverts> <x y>...   (× count; nverts may be 0)
  * portals <count>
  * <from> <to> <ax> <ay> <bx> <by>     (× count)
- * pvs <count> hex-lsb
- * <hex row>                           (× count; "-" for an all-zero row)
+ * pvs <rowCount> hex-lsb
+ * <hex row>                           (× rowCount; "-" for an all-zero row)
  * ```
+ *
+ * `<pvsRow>` indexes the rows after the `pvs` header (0-based).
  */
 export function exportPvsText(result: CompileResult): string {
   const doc = buildPvsDocument(result);
@@ -96,13 +116,20 @@ export function exportPvsText(result: CompileResult): string {
   for (const p of doc.planes) lines.push(p.join(" "));
   lines.push(`nodes ${doc.nodes.length} root ${doc.root}`);
   for (const n of doc.nodes) lines.push(n.join(" "));
+  lines.push(`walls ${doc.walls.length}`);
+  for (const w of doc.walls) lines.push([...w.a, ...w.b].join(" "));
   lines.push(`leaves ${doc.leaves.length}`);
-  for (const l of doc.leaves) lines.push([l.contents, l.polygon?.length ?? 0, ...(l.polygon ?? []).flat()].join(" "));
+  for (const l of doc.leaves) {
+    lines.push([l.contents, l.pvs, l.walls.length, ...l.walls, l.polygon?.length ?? 0, ...(l.polygon ?? []).flat()].join(" "));
+  }
   lines.push(`portals ${doc.portals.length}`);
   for (const p of doc.portals) lines.push([p.from, p.to, ...p.a, ...p.b].join(" "));
   lines.push(`pvs ${doc.pvs.rows.length} ${doc.pvs.encoding}`);
   for (const r of doc.pvs.rows) lines.push(/^0*$/.test(r) ? "-" : r);
   return lines.join("\n") + "\n";
 }
+
+/** Visible leaf indices from `leaf`, following the shared-row indirection of an exported document. */
+export const decodeLeafPvs = (doc: PvsDocument, leaf: number): number[] => decodePvsRow(doc.pvs.rows[doc.leaves[leaf].pvs]);
 
 export { decodePvsRow };

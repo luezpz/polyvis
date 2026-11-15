@@ -113,8 +113,9 @@ and leaves stay the convex BSP cells, so dynamic objects can still be tested aga
 Rows are hex, LSB-first per byte (bit `j` → byte `j >> 3`,
 bit `j & 7`), like Quake. `src/d3/core/export/pvsExport.ts` documents both encodings.
 
-The 2D export (`polyvis-pvs-2d`, version 1) still stores one PVS row per leaf and leaf
-polygons instead of bounds; bringing it to the 3D layout is on the [PLAN](PLAN.md).
+The 2D export (`polyvis-pvs-2d`, version 2) uses the same layout (shared rows, `walls`,
+per-leaf wall lists), with leaf polygons instead of bounds and walls as `a`/`b` segments;
+see `src/d2/core/export/pvsExport.ts`.
 
 ## Project layout
 

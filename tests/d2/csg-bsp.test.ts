@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  buildWalls, buildBsp, locateLeaf, makeEmptySpaceTest, segmentLength, SAMPLE_LEVELS,
+  buildWalls, buildBsp, buildLeafSurfaces, locateLeaf, makeEmptySpaceTest, segmentLength, SAMPLE_LEVELS,
   aabbFromPoints, classifyPoints, convexContains, Side, type Wall,
 } from "../../src/d2/core";
 import { boxLevel, randomLevel, rng } from "./helpers";
@@ -95,6 +95,20 @@ describe("BSP", () => {
         walk(node.back, next);
       };
       walk(tree.root, new Set());
+    }
+  });
+});
+
+describe("leaf surfaces", () => {
+  it("assigns every bit of wall area to exactly one empty leaf", () => {
+    const total = (ws: readonly { winding: { a: { x: number; y: number }; b: { x: number; y: number } } }[]) =>
+      ws.reduce((s, w) => s + segmentLength(w.winding), 0);
+    for (const level of [...SAMPLE_LEVELS.map((s) => s.create()), randomLevel(3), randomLevel(7)]) {
+      const walls = buildWalls(level.brushes);
+      const { tree } = buildBsp(walls);
+      const surfaces = buildLeafSurfaces(tree, walls);
+      expect(total(surfaces.flat()) / total(walls)).toBeCloseTo(1, 6);
+      surfaces.forEach((list, i) => list.length && expect(tree.leaves[i].contents).toBe("empty"));
     }
   });
 });

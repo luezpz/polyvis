@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
-  compileLevel, compileWalls, locateLeaf, leafComponents, makeWall, SAMPLE_LEVELS,
-  exportPvsJson, exportPvsText, decodePvsRow, type Wall,
+  compileLevel, compileWalls, locateLeaf, leafComponents, makeWall, lineOfSight, castRay, SAMPLE_LEVELS,
+  exportPvsJson, exportPvsText, decodePvsRow, decodeLeafPvs, pvsRowOf, type Wall, type Level, type PvsDocument,
 } from "../../src/d2/core";
-import { boxLevel, emptyLeaves, lineOfSight, randomLevel, randomPointInLeaf, rng } from "./helpers";
+import { boxLevel, emptyLeaves, randomLevel, randomPointInLeaf, rng } from "./helpers";
+
+const sample = (name: string): Level => SAMPLE_LEVELS.find((s) => s.name === name)!.create();
 
 describe("portals", () => {
   it("connects all empty leaves of a connected level", () => {
@@ -25,6 +27,17 @@ describe("portals", () => {
       expect(t.to).toBe(p.from);
       // Twins lie on the same line with opposite orientation.
       expect(p.plane.n.x * t.plane.n.x + p.plane.n.y * t.plane.n.y).toBeCloseTo(-1);
+    }
+  });
+
+  it("orients portals into their destination leaf", () => {
+    const r = compileLevel(SAMPLE_LEVELS[0].create());
+    for (const p of r.graph.portals) {
+      const c = { x: (p.winding.a.x + p.winding.b.x) / 2, y: (p.winding.a.y + p.winding.b.y) / 2 };
+      const ahead = { x: c.x + p.plane.n.x * 1e-3, y: c.y + p.plane.n.y * 1e-3 };
+      const behind = { x: c.x - p.plane.n.x * 1e-3, y: c.y - p.plane.n.y * 1e-3 };
+      expect(locateLeaf(r.tree, ahead)).toBe(p.to);
+      expect(locateLeaf(r.tree, behind)).toBe(p.from);
     }
   });
 
@@ -125,23 +138,94 @@ describe("PVS", () => {
     });
   });
 
-  it("flow is at least as tight as base vis", () => {
+  it("flow is at least as tight as base vis, and strictly tighter somewhere", () => {
     const r = compileLevel(SAMPLE_LEVELS[0].create());
+    r.portalVis.forEach((v, i) => expect(v.hasAnyNotIn(r.mightSee[i])).toBe(false));
+    expect(r.summary.averagePortalVis).toBeLessThan(r.summary.averageMightSee);
+  });
+
+  it("truncated flow falls back to base vis (still conservative)", () => {
+    const r = compileLevel(SAMPLE_LEVELS[0].create(), { flow: { maxSteps: 50 } });
+    expect(r.flowStats.truncated).toBe(true);
     r.portalVis.forEach((v, i) => expect(v.hasAnyNotIn(r.mightSee[i])).toBe(false));
   });
 });
 
+describe("analysis", () => {
+  it("castRay hits the nearest wall and agrees with lineOfSight", () => {
+    const r = compileLevel(boxLevel([["room", 0, 0, 10, 10]]));
+    const hit = castRay(r.walls, { x: 2, y: 5 }, { x: 3, y: 0 })!;
+    expect(hit.t).toBeCloseTo(8);
+    expect(hit.point.x).toBeCloseTo(10);
+    expect(r.walls[hit.wall].plane.n.x).toBeCloseTo(-1);
+    expect(castRay(r.walls, { x: 2, y: 5 }, { x: 1, y: 0 }, 5)).toBeNull();
+    expect(lineOfSight(r.walls, { x: 1, y: 1 }, { x: 9, y: 9 })).toBe(true);
+    expect(lineOfSight(r.walls, { x: 1, y: 1 }, { x: 11, y: 1 })).toBe(false);
+  });
+});
+
+describe("shared PVS rows", () => {
+  const levels = () => [...SAMPLE_LEVELS.map((s) => s.create()), randomLevel(104, 7)];
+
+  it("decodes back to the original PVS bit for bit", () => {
+    for (const level of levels()) {
+      const r = compileLevel(level);
+      expect(r.pvsTable.leafRow).toHaveLength(r.pvs.length);
+      r.pvs.forEach((row, leaf) => expect(pvsRowOf(r.pvsTable, leaf).equals(row)).toBe(true));
+    }
+  });
+
+  it("stores each distinct row exactly once", () => {
+    for (const level of levels()) {
+      const r = compileLevel(level);
+      const hex = r.pvsTable.rows.map((row) => row.toHex());
+      expect(new Set(hex).size).toBe(hex.length);
+      expect(hex.length).toBe(new Set(r.pvs.map((row) => row.toHex())).size);
+      // Every row is used, and all solid leaves share the single empty row.
+      expect(new Set(r.pvsTable.leafRow).size).toBe(hex.length);
+      const solidRows = new Set(r.tree.leaves.flatMap((l, i) => (l.contents === "solid" ? [r.pvsTable.leafRow[i]] : [])));
+      expect(solidRows.size).toBe(1);
+      expect(r.pvsTable.rows[[...solidRows][0]].count()).toBe(0);
+    }
+  });
+
+  it("actually removes duplicates", () => {
+    const r = compileLevel(sample("Zigzag"));
+    expect(r.pvsTable.rows.length).toBeLessThan(r.pvs.length);
+  });
+});
+
 describe("export", () => {
-  it("encodes the same PVS in JSON and text", () => {
-    const r = compileLevel(boxLevel([["room", 0, 0, 6, 6], ["room", 6, 2, 12, 4], ["room", 10, 4, 12, 12], ["room", 12, 10, 18, 12]]));
-    const doc = JSON.parse(exportPvsJson(r));
+  it("encodes the same PVS in JSON and text, through the shared-row indirection", () => {
+    const r = compileLevel(sample("Zigzag"));
+    const doc = JSON.parse(exportPvsJson(r)) as PvsDocument;
     expect(doc.format).toBe("polyvis-pvs-2d");
-    doc.pvs.rows.forEach((row: string, i: number) => expect(decodePvsRow(row)).toEqual(r.pvs[i].toArray()));
+    expect(doc.version).toBe(2);
+    expect(doc.walls).toHaveLength(r.walls.length);
+    expect(doc.leaves).toHaveLength(r.tree.leaves.length);
+    expect(doc.pvs.rows).toHaveLength(r.pvsTable.rows.length);
+    r.pvs.forEach((row, leaf) => expect(decodeLeafPvs(doc, leaf)).toEqual(row.toArray()));
+    // Leaf wall lists match the leaf surfaces; solid leaves list none.
+    doc.leaves.forEach((l, i) => {
+      expect(l.walls).toEqual([...new Set(r.surfaces[i].map((s) => s.wall))].sort((a, b) => a - b));
+      if (l.contents === "solid") expect(l.walls).toEqual([]);
+    });
 
     const text = exportPvsText(r).trim().split("\n");
+    expect(text[0]).toBe("polyvis-pvs-2d 2");
+    expect(text).toContain(`walls ${r.walls.length}`);
+    const leavesHeader = text.findIndex((l) => l.startsWith("leaves "));
+    const leafLines = text.slice(leavesHeader + 1, leavesHeader + 1 + r.tree.leaves.length);
     const pvsHeader = text.findIndex((l) => l.startsWith("pvs "));
+    expect(text[pvsHeader]).toBe(`pvs ${r.pvsTable.rows.length} hex-lsb`);
     const rows = text.slice(pvsHeader + 1);
-    expect(rows).toHaveLength(r.pvs.length);
-    rows.forEach((row, i) => expect(decodePvsRow(row)).toEqual(r.pvs[i].toArray()));
+    expect(rows).toHaveLength(r.pvsTable.rows.length);
+    leafLines.forEach((line, leaf) => {
+      // <contents> <pvsRow> <nwalls> <wall>... <nverts> <x y>...
+      const tok = line.split(" ");
+      const nwalls = Number(tok[2]);
+      expect(tok.slice(3, 3 + nwalls).map(Number)).toEqual(doc.leaves[leaf].walls);
+      expect(decodePvsRow(rows[Number(tok[1])])).toEqual(r.pvs[leaf].toArray());
+    });
   });
 });

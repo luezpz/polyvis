@@ -4,7 +4,44 @@
  * every viewpoint inside the leaf.
  */
 
-import { type Vec2, type Segment, cross, sub } from "../math";
+import { type Vec2, type Segment, type Line2, addScaled, cross, normalize, sub, segmentIntersection } from "../math";
+import type { Wall } from "../csg";
+
+/** Closest wall hit along a ray (same shape as the 3D `RayHit`). */
+export interface RayHit {
+  /** Distance along the (unit) direction. */
+  readonly t: number;
+  readonly point: Vec2;
+  /** Index of the wall that was hit. */
+  readonly wall: number;
+}
+
+/**
+ * Casts a ray against all walls (two-sided). `dir` need not be unit.
+ * Returns the nearest hit within `maxDistance`, or null.
+ */
+export function castRay(walls: readonly { readonly winding: Segment; readonly plane: Line2 }[], origin: Vec2, dir: Vec2, maxDistance = Infinity): RayHit | null {
+  const d = normalize(dir);
+  let best = maxDistance;
+  let wall = -1;
+  walls.forEach((w, i) => {
+    const t = rayHit(origin, d, w.winding);
+    if (t !== null && t < best) {
+      best = t;
+      wall = i;
+    }
+  });
+  return wall < 0 ? null : { t: best, point: addScaled(origin, d, best), wall };
+}
+
+/**
+ * True if the open segment p→q does not touch any wall. Touching a wall end
+ * (within 1e-6 in parameter space) counts as blocked, which keeps the
+ * conservativeness tests on the safe side.
+ */
+export function lineOfSight(walls: readonly Wall[], p: Vec2, q: Vec2): boolean {
+  return !walls.some((w) => segmentIntersection(p, q, w.winding.a, w.winding.b, 1e-6) !== null);
+}
 
 /**
  * Visibility polygon of `origin` among `walls`, by angular ray casting.

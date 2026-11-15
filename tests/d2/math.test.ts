@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   clipPolygon, clipSegmentFront, convexHull, lineFromPoints, makePolygon, signedArea, isConvexCCW,
-  classifySegment, Side, BitSet,
+  classifySegment, Side, BitSet, buildSeparators,
 } from "../../src/d2/core";
 
 describe("line2", () => {
@@ -57,6 +57,25 @@ describe("convexHull", () => {
     const hull = convexHull([{ x: 0, y: 0 }, { x: 1, y: 0 }, { x: 2, y: 0 }, { x: 2, y: 2 }, { x: 1, y: 1 }, { x: 0, y: 2 }]);
     expect(hull).toHaveLength(4);
     expect(isConvexCCW(hull)).toBe(true);
+  });
+});
+
+describe("separators", () => {
+  it("bound the region visible through two parallel portals", () => {
+    const src = { a: { x: -1, y: 0 }, b: { x: 1, y: 0 } }; // source at y = 0
+    const pass = { a: { x: -1, y: 2 }, b: { x: 1, y: 2 } }; // pass at y = 2
+    const seps = buildSeparators(src, pass);
+    expect(seps.length).toBeGreaterThan(0);
+    const side = (l: { n: { x: number; y: number }; d: number }, v: { x: number; y: number }) => l.n.x * v.x + l.n.y * v.y - l.d;
+    // Every separator keeps the pass in front (or on) and the source behind (or on).
+    for (const l of seps) {
+      for (const v of [pass.a, pass.b]) expect(side(l, v)).toBeGreaterThanOrEqual(-1e-9);
+      for (const v of [src.a, src.b]) expect(side(l, v)).toBeLessThanOrEqual(1e-9);
+    }
+    // Beyond the pass the visible region widens linearly: at y = 4 it spans |x| <= 3.
+    const front = (q: { x: number; y: number }) => seps.every((l) => side(l, q) >= 0);
+    expect(front({ x: 2.9, y: 4 })).toBe(true);
+    expect(front({ x: 3.1, y: 4 })).toBe(false);
   });
 });
 
