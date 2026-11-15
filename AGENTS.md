@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Guidance for AI coding agents (and humans). Read this first, then `PLAN.md` / `PROGRESS.md`.
+Guidance for AI coding agents (and humans). Read this first, then `NOTES.md` (decisions, open TODOs).
 
 ## What this is
 
@@ -37,17 +37,19 @@ src/shared/core/      dimension-agnostic compiler, generic over D extends Dim
   pipeline.ts         createCompiler(config) → { compileLevel, compileWalls }
   export/pvsRows.ts   decodePvsRow
 src/d2/core/          2D kernel: Vec2, Line2, Segment, ConvexPolygon; CSG; portal discovery;
-                      2D antipenumbra; geometry.ts (geometry2); pipeline binding; export
+                      2D antipenumbra; line-of-sight analysis; geometry.ts (geometry2);
+                      pipeline binding; export
 src/d3/core/          3D kernel: Vec3, Plane3, Winding, ConvexPolyhedron, brushes as planes;
-                      CSG + mesh walls; OBJ import; 3D antipenumbra; geometry.ts (geometry3)
+                      CSG + mesh walls; OBJ import; 3D antipenumbra; line-of-sight analysis;
+                      geometry.ts (geometry3); pipeline binding; export
 src/shared/app/        browser code shared by both editors (never imported by core)
   editor/             history, BaseViewState (layers, probe, snapping)
   compile/            CompileClient<D, L>, worker protocol + hydrateResult, serveCompiler
   ui/                 dom helpers, panel widgets, compile panel sections, base styles.css
   render/palette.ts   brush-kind colours, leaf hue
-src/d2/app, src/d3/app   editors (separate on purpose; see PLAN.md for sharing candidates)
+src/d2/app, src/d3/app   editors (separate on purpose; see NOTES.md)
 tests/shared          Geometry contract tests run against both kernels
-tests/d2, tests/d3    per-dimension suites (ported verbatim from polyvis2d / polyvis3d)
+tests/d2, tests/d3    per-dimension suites (originally from polyvis2d / polyvis3d)
 docs/ALGORITHMS.md    index → ALGORITHMS-2D.md, ALGORITHMS-3D.md
 2d.html, 3d.html, index.html   Vite multi-page entry points
 ```
@@ -65,8 +67,7 @@ Apps and tests only import their own dimension's barrel; they never pass a `Geom
 | CSG, portal discovery, import formats, export layout    | `src/d{2,3}/core`            |
 | UI / rendering                                          | `src/d{2,3}/app`; parts both editors use in `src/shared/app` |
 
-Every feature landing in one dimension gets a PROGRESS.md line saying whether the other
-dimension has it; parity gaps are tracked in PLAN.md.
+Features should land in both dimensions; record any intentional parity gap in NOTES.md.
 
 ## Architecture rules
 
@@ -114,4 +115,4 @@ dimension has it; parity gaps are tracked in PLAN.md.
 
 - 2D and 3D default `minCellSize` differ (0.5 vs 1): defaults live in each `bsp/bsp.ts`.
 - Autosave keys differ per editor (`polyvis.level.v1`, `polyvis3d.level.v1`); same origin now.
-- `git` history of the original repos is not carried over (see PROGRESS.md).
+- `git` history of the original repos is not carried over (see NOTES.md).

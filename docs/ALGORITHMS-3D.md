@@ -1,25 +1,25 @@
 # Algorithms
 
 This document explains each compiler stage, the conventions that tie them together, and what
-changed when porting from the 2D version. Source files are referenced relative to `src/core/`.
+changed when porting from the 2D version. Source paths are relative to `src/`: shared stages live in `shared/core/`, 3D-specific code in `d3/core/`.
 
 ## Conventions (read this first)
 
 | Concept | Representation | Convention |
 |---|---|---|
-| Plane | `Plane3 { n, d }` (`math/plane3.ts`) | Points with `n·p = d`. **Front** = side the unit normal points to |
-| Winding | `Winding = Vec3[]` (`math/winding.ts`) | Convex, planar, **CCW seen from the front** (right-hand rule) |
+| Plane | `Plane3 { n, d }` (`d3/core/math/plane3.ts`) | Points with `n·p = d`. **Front** = side the unit normal points to |
+| Winding | `Winding = Vec3[]` (`d3/core/math/winding.ts`) | Convex, planar, **CCW seen from the front** (right-hand rule) |
 | Wall | `Wall { winding, plane }` | Empty space in **front** |
-| Brush | outward `planes` + derived `faces` (`level/brush.ts`) | Inside = behind every plane |
-| Leaf region | `ConvexPolyhedron` (`math/polyhedron.ts`) | Faces with outward planes; `tag` = BSP plane index that produced the face (`BOUNDS_TAG` for the bounding box) |
+| Brush | outward `planes` + derived `faces` (`d3/core/level/brush.ts`) | Inside = behind every plane |
+| Leaf region | `ConvexPolyhedron` (`d3/core/math/polyhedron.ts`) | Faces with outward planes; `tag` = BSP plane index that produced the face (`BOUNDS_TAG` for the bounding box) |
 | Directed portal | `Portal` | Leads `from` → `to`; plane normal points **into `to`**; winding CCW seen from `to` |
 | BSP child ref | `number` | `>= 0` node index, `< 0` leaf `~ref` (= `-ref - 1`) |
 
-The world is Z-up. All tolerances live in `math/tolerance.ts`. "On a plane" means within
+The world is Z-up. All tolerances live in `shared/core/math/tolerance.ts`. "On a plane" means within
 `PLANE_EPSILON`. Clipping (`clipWinding`) *discards* windings lying exactly on a clip plane: for
 visibility, grazing contact cannot be seen through.
 
-## 0. Brushes (`level/brush.ts`)
+## 0. Brushes (`d3/core/level/brush.ts`)
 
 A brush is a set of outward planes (Quake `.map` style), which makes any convex brush possible
 (boxes, prisms, ramps). Faces are derived: each plane's large base winding is clipped by all
@@ -27,7 +27,7 @@ other planes; planes whose face vanishes are redundant and dropped; unbounded or
 plane sets are rejected. A second clipping pass with base windings sized to the brush keeps
 vertices exact. Editing operations (translate, push a face) just change plane distances.
 
-## 1. CSG: brushes → walls (`csg/walls.ts`)
+## 1. CSG: brushes → walls (`d3/core/csg/walls.ts`)
 
 `empty = (∪ room brushes) − (∪ solid brushes)`.
 
@@ -43,10 +43,10 @@ vertices exact. Editing operations (translate, push a face) just change plane di
    walls accepted earlier (convex polygon difference by edge planes, the in-plane version of
    step 1), so every bit of the boundary is covered exactly once.
 
-The result is watertight (`tests/csg-bsp.test.ts` checks that Σ area·n = 0). Imported meshes
-skip this stage (`csg/meshWalls.ts`).
+The result is watertight (`tests/d3/csg-bsp.test.ts` checks that Σ area·n = 0). Imported meshes
+skip this stage (`d3/core/csg/meshWalls.ts`).
 
-## 2. Solid-leaf BSP (`bsp/build.ts`)
+## 2. Solid-leaf BSP (`shared/core/bsp/build.ts`)
 
 Unchanged from 2D apart from the primitives:
 
@@ -59,7 +59,7 @@ Unchanged from 2D apart from the primitives:
   all ancestor planes (`clipPolyhedron`: clip every face, add a cap face on the cutting plane
   tagged with its plane index). Leaves keep theirs.
 
-**Empty-leaf refinement** (`bsp/refine.ts`), in 3D:
+**Empty-leaf refinement** (`shared/core/bsp/refine.ts`), in 3D:
 
 - `cornerSplits`: any wall that **touches the cell** (its polygon comes within `PROBE_OFFSET`
   of the cell, tested by clipping it to the cell's faces pushed outwards) and whose plane cuts
@@ -70,11 +70,11 @@ Unchanged from 2D apart from the primitives:
 - `minCellSize`: refinement splits leaving a side thinner than this are rejected. The 3D
   default is 1 (2D: 0.5), since cells, portals and flow time grow much faster in 3D.
 
-**Leaf surfaces** (`bsp/surfaces.ts`, Quake's marksurfaces): each wall is pushed down the tree
+**Leaf surfaces** (`shared/core/bsp/surfaces.ts`, Quake's marksurfaces): each wall is pushed down the tree
 (split where it spans a plane; a wall lying on a plane goes to the side it faces), so every
 empty leaf knows the wall pieces bounding it. The editor renders these; the export lists them.
 
-## 3. Portals (`portals/portals.ts`)
+## 3. Portals (`d3/core/portals/portals.ts`)
 
 Two empty leaves are adjacent iff they have faces tagged with the same plane, one leaf in front
 of it and the other behind. The portal is the **2D convex intersection** of the two faces on
@@ -82,15 +82,15 @@ that plane: one face is clipped by the inward edge planes of the other
 (`intersectCoplanarWindings`). Tags make this exact, and T-junctions (one big face facing several
 small leaves) fall out naturally. Every opening produces two directed portals (twins).
 
-**Leaks** (`portals/leaks.ts`): an empty leaf with a `BOUNDS_TAG` face touches the void; we
+**Leaks** (`shared/core/portals/leaks.ts`): an empty leaf with a `BOUNDS_TAG` face touches the void; we
 report it plus everything reachable from it, but keep compiling.
 
-## 4. Base vis (`vis/baseVis.ts`)
+## 4. Base vis (`shared/core/vis/baseVis.ts`)
 
 Unchanged: per portal *i*, the portals *j* partly in front of *i* with *i* partly behind *j*,
 flood-filled from `i.to` (Golodetz Listings 4–5).
 
-## 5. Portal flow (`vis/portalFlow.ts`, `vis/antipenumbra.ts`)
+## 5. Portal flow (`shared/core/vis/portalFlow.ts`, `d3/core/vis/antipenumbra.ts`)
 
 The same depth-first walk as in 2D, carrying `source`, `pass` and `might`. For each generator
 portal *G*: clip `source` to the back of *G*; clip *G* to the front of *S*; clip *G* by the
@@ -108,12 +108,12 @@ Shrinking `source` and `pass` is conservative: any real sight line through the c
 every clipped winding. Portals are processed in increasing "might see" size so finished results
 prune later searches. `maxSteps` falls back to base vis if a level explodes combinatorially.
 
-## 6. Leaf PVS (`vis/leafPvs.ts`)
+## 6. Leaf PVS (`shared/core/vis/leafPvs.ts`)
 
 Unchanged: `PVS(leaf) = {leaf} ∪ neighbours ∪ ⋃_{p ∈ portalsFrom(leaf)} { q.to | q ∈ portalVis[p] }`,
 with optional `intersect`/`union` symmetry.
 
-**Shared rows** (`vis/pvsTable.ts`): many leaves have identical rows (every solid leaf has the
+**Shared rows** (`shared/core/vis/pvsTable.ts`): many leaves have identical rows (every solid leaf has the
 empty row; neighbouring cells often see exactly the same set). The table stores each distinct
 row once plus `leafRow[leaf]`, an index into it. It is pure indirection: bits still index
 leaves, the leaves stay convex, and decoding returns the original PVS bit for bit. The export
@@ -121,7 +121,7 @@ leaves, the leaves stay convex, and decoding returns the original PVS bit for bi
 
 ## Correctness checks
 
-`tests/vis.test.ts` samples random point pairs in random leaves of sample and randomly generated
+`tests/d3/vis.test.ts` samples random point pairs in random leaves of sample and randomly generated
 3D levels (rooms wandering in x, y and z, with solid blocks); whenever the segment between them
 crosses no wall polygon, the PVS **must** contain the target leaf. That invariant
 (PVS ⊇ true visibility) is the definition of a correct PVS. The editor's "True line of sight"
@@ -129,7 +129,7 @@ layer shows the same thing interactively: rays from the probe, red dots would be
 
 ## Mesh input (Blender)
 
-`import/obj.ts`: parse `v`/`f` (Y-up → Z-up optional; the rotation `(x, y, z) → (x, −z, y)`
+`d3/core/import/obj.ts`: parse `v`/`f` (Y-up → Z-up optional; the rotation `(x, y, z) → (x, −z, y)`
 preserves orientation), triangulate n-gons by ear clipping, weld duplicate vertices, then merge
 coplanar triangles sharing an edge into convex polygons. Faces must point into the rooms (flip
 normals otherwise). The faces go straight into the BSP; leaf regions are closed by the bounding
@@ -149,7 +149,8 @@ box, and leaks are reported, not fatal.
 | Portals: interval overlap on a line | convex polygon intersection on a plane |
 | Separators: endpoint × endpoint | edge × vertex, both directions |
 | Leak: touches the bounding rectangle | touches the bounding box (6 faces) |
-| — | Leaf surfaces (marksurfaces), OBJ import |
+| Brush-only input | OBJ mesh import (`compileWalls` also accepts raw walls in 2D) |
 
 Everything above the geometry layer (tree layout, portal graph, bitsets, base vis, flow
-recursion, PVS assembly, export structure) carried over unchanged.
+recursion, PVS assembly, row sharing) is one shared implementation in `src/shared/core`; the
+two export formats share the same layout.

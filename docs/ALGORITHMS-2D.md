@@ -1,23 +1,23 @@
 # Algorithms
 
 This document explains each compiler stage, the conventions that tie them together, and what
-changes when moving from 2D to 3D. Source files are referenced relative to `src/core/`.
+changes when moving from 2D to 3D. Source paths are relative to `src/`: shared stages live in `shared/core/`, 2D-specific code in `d2/core/`.
 
 ## Conventions (read this first)
 
 | Concept | 2D representation | Convention |
 |---|---|---|
-| Plane | `Line2 { n, d }` (`math/line2.ts`) | Points with `n·p = d`. **Front** = side the unit normal points to |
+| Plane | `Line2 { n, d }` (`d2/core/math/line2.ts`) | Points with `n·p = d`. **Front** = side the unit normal points to |
 | Wall / face | `Segment` + `Line2` | Oriented a→b, **empty space on the left = front** |
 | Leaf region | `ConvexPolygon` | CCW; `tags[i]` = index of the BSP plane that produced edge i (`BOUNDS_TAG` for the bounding box) |
 | Directed portal | `Portal` | Leads `from` → `to`; normal points **into `to`**; segment has `to` on its left |
 | BSP child ref | `number` | `>= 0` node index, `< 0` leaf `~ref` (= `-ref - 1`) |
 
-All tolerances live in `math/tolerance.ts`. "On a plane" means within `PLANE_EPSILON`.
+All tolerances live in `shared/core/math/tolerance.ts`. "On a plane" means within `PLANE_EPSILON`.
 Clipping *discards* parts lying exactly on a clip plane: for visibility, grazing contact cannot be
 seen through.
 
-## 1. CSG: brushes → walls (`csg/walls.ts`)
+## 1. CSG: brushes → walls (`d2/core/csg/walls.ts`)
 
 `empty = (∪ room brushes) − (∪ solid brushes)`.
 
@@ -33,7 +33,7 @@ seen through.
 The result is always watertight. Non-CSG input (imported meshes) can bypass this stage via
 `compileWalls()`.
 
-## 2. Solid-leaf BSP (`bsp/build.ts`)
+## 2. Solid-leaf BSP (`shared/core/bsp/build.ts`)
 
 Recursive build over wall fragments:
 
@@ -44,7 +44,7 @@ Recursive build over wall fragments:
   coplanar fragments go back; spanning ones are split.
 - No fragments left in front → **empty** leaf. None left behind → **solid** leaf.
 
-**Empty-leaf refinement** (`bsp/refine.ts`, all in `BspBuildOptions`). A plain solid-leaf BSP
+**Empty-leaf refinement** (`shared/core/bsp/refine.ts`, all in `BspBuildOptions`). A plain solid-leaf BSP
 lets one big cell wrap around a convex solid corner (pillar, door jamb, inner corner of an L),
 so its PVS row is everything visible from *either* side. Instead of closing an empty region as a
 leaf straight away, the builder keeps splitting it:
@@ -63,9 +63,9 @@ cells mean more portals, so flow time grows roughly with the cell count.
 
 Each node carries its convex region (the bounding box, expanded by `boundsMargin`, clipped by all
 ancestor planes); leaves keep theirs. The bounding box keeps regions finite even when the level
-leaks, as suggested in the design brief.
+leaks.
 
-## 3. Portals (`portals/portals.ts`)
+## 3. Portals (`d2/core/portals/portals.ts`)
 
 Two empty leaves are adjacent iff they have edges tagged with the same plane, one leaf in front of
 it and the other behind. The portal is the overlap of those two edges' intervals along the plane.
@@ -75,10 +75,10 @@ several small leaves) fall out naturally.
 Every opening produces two directed portals (twins). Graph: nodes = leaves, edges = directed
 portals (`portalsFrom[leaf]`).
 
-**Leaks** (`portals/leaks.ts`): an empty leaf with a `BOUNDS_TAG` edge touches the void. We
+**Leaks** (`shared/core/portals/leaks.ts`): an empty leaf with a `BOUNDS_TAG` edge touches the void. We
 report it plus everything reachable from it (Quake's outside flood), but keep compiling.
 
-## 4. Base vis (`vis/baseVis.ts`)
+## 4. Base vis (`shared/core/vis/baseVis.ts`)
 
 Cheap conservative "might see" set per portal *i* (Golodetz Listings 4–5):
 
@@ -86,7 +86,7 @@ Cheap conservative "might see" set per portal *i* (Golodetz Listings 4–5):
 2. *i* must be partly behind *j* (portals are looked through from behind);
 3. flood fill from `i.to` along portals passing 1 and 2.
 
-## 5. Portal flow (`vis/portalFlow.ts`, `vis/antipenumbra.ts`)
+## 5. Portal flow (`shared/core/vis/portalFlow.ts`, `d2/core/vis/antipenumbra.ts`)
 
 Depth-first walk from each source portal *S* through the graph, carrying:
 
@@ -114,36 +114,25 @@ every clipped winding. Portals are processed in increasing "might see" size so f
 (`portalVis`) can replace `mightSee` for pruning, as Quake does. A `maxSteps` safety valve falls
 back to base vis if a pathological level explodes combinatorially.
 
-## 6. Leaf PVS (`vis/leafPvs.ts`)
+## 6. Leaf PVS (`shared/core/vis/leafPvs.ts`)
 
 `PVS(leaf) = {leaf} ∪ neighbours ∪ ⋃_{p ∈ portalsFrom(leaf)} { q.to | q ∈ portalVis[p] }`.
 
 Optional symmetry: since both directions are conservative, `intersect` (A sees B only if B sees A)
 remains conservative and is slightly tighter; `union` is the most defensive.
 
+Leaf surfaces (`shared/core/bsp/surfaces.ts`) and shared PVS rows (`shared/core/vis/pvsTable.ts`)
+are the same shared code as in 3D; see [ALGORITHMS-3D.md](ALGORITHMS-3D.md). The 2D export
+(`d2/core/export/pvsExport.ts`, format version 2) uses both.
+
 ## Correctness checks
 
-`tests/vis.test.ts` samples random point pairs in random levels; whenever the straight segment
+`tests/d2/vis.test.ts` samples random point pairs in random levels; whenever the straight segment
 between them crosses no wall, the PVS **must** contain the target leaf. That invariant (PVS ⊇ true
 visibility) is the definition of a correct PVS. The editor's "True line of sight" layer shows the
 same thing interactively.
 
-## Porting to 3D
+## 2D vs 3D
 
-| 2D (here) | 3D |
-|---|---|
-| `Vec2`, `Line2` | `Vec3`, `Plane3` |
-| `Segment` (wall, portal) | convex polygon *winding* |
-| `clipSegmentFront` | Sutherland–Hodgman polygon clip against a plane |
-| `ConvexPolygon` leaf region with edge tags | convex polyhedron = list of face windings, each tagged with its plane |
-| CSG by edge fragmentation + side probing | same idea on polygons: split faces by other brushes' planes, probe both sides, drop interior/duplicate faces. For Blender meshes: merge coplanar triangles into polygons first, use face normals for orientation |
-| Portals = interval overlap on a shared plane | 2D convex polygon intersection of the two faces on the shared plane (project to the plane's 2D basis) — or Quake's method of pushing a huge plane winding down the tree |
-| Separators: endpoint × endpoint | edge × vertex, both directions (Golodetz Listing 2) |
-| Leak = touches bounding box | identical; bounds become an AABB of 6 planes |
-
-Everything above the geometry layer — tree layout, portal graph, bitsets, base vis, flow
-recursion, PVS assembly, export — carries over unchanged in structure.
-
-For Blender input, expect a mesh that is *not* watertight. Plan: export triangles (with normals
-pointing into rooms) → merge coplanar faces → feed straight into the BSP (`compileWalls`
-equivalent) → leaf regions are closed by the bounding box → leaks are reported, not fatal.
+Only the geometry kernel, CSG, portal discovery and separator construction differ; see the
+"What changed from 2D" table in [ALGORITHMS-3D.md](ALGORITHMS-3D.md).

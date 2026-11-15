@@ -28,7 +28,7 @@ npm test           # unit tests + randomized line-of-sight ground-truth checks (
 npm run build      # typecheck + production bundle in dist/
 ```
 
-Requires Node 20+ (and WebGL2 for the 3D editor). Zero runtime dependencies.
+Requires Node 20.19+ or 22.12+ (Vite 8) (and WebGL2 for the 3D editor). Zero runtime dependencies.
 
 ## Using the editors
 
@@ -36,7 +36,7 @@ Requires Node 20+ (and WebGL2 for the 3D editor). Zero runtime dependencies.
 
 | Tool | Key | What it does |
 |---|---|---|
-| Select | `V` | Click to select (smallest brush under cursor), drag to move, drag vertex handles to reshape, `Del` delete, `Ctrl+D` duplicate |
+| Select | `V` | Click to select (smallest brush under cursor; click again to cycle to larger ones), drag to move, drag vertex dots to reshape, drag edge squares to push/pull an edge, `Del` delete, `Ctrl+D` duplicate |
 | Box | `B` | Drag a rectangle brush |
 | Polygon | `P` | Click points; `Enter` / double-click / click the first point to finish. The brush is the convex hull of the points |
 | Inspect | `I` | Hover to probe the PVS of the leaf under the cursor; click to pin; hover a portal to see its portal vis |
@@ -44,14 +44,15 @@ Requires Node 20+ (and WebGL2 for the 3D editor). Zero runtime dependencies.
 - `K` toggles between **room** brushes (carve empty space) and **solid** brushes (occluders such as
   pillars put back inside rooms). With a brush selected in Select mode, `K` toggles that brush.
 - Wheel zooms; middle/right drag or `Space`+drag pans; `F` fits the view; `Ctrl+Z` / `Ctrl+Y` undo/redo.
-- The level recompiles on every edit (a few ms) and is autosaved to `localStorage`.
+- The level recompiles in a Web Worker on every edit and is autosaved to `localStorage`.
 - **Save…/Open…** read and write the level as JSON. **Export PVS** writes the compiled
   BSP + portals + PVS as JSON or as a line-based text file.
 
 #### Reading the view
 
 - Coloured cells: empty BSP leaves. White lines: walls (ticks point into empty space).
-  Yellow: portals. Orange dashed (optional): BSP splitters.
+  Yellow: portals. Orange dashed (optional): BSP splitters. "Surfaces (PVS coloured)" draws
+  each leaf's wall pieces coloured by the probe's PVS; "Hide culled surfaces" hides the rest.
 - Inspect: the probed leaf is bright green, its PVS light green, everything it cannot see is
   darkened. The white fan is the **exact** visibility from the cursor. The PVS must always cover
   the fan (it is conservative: it can be larger, never smaller).
@@ -122,13 +123,14 @@ see `src/d2/core/export/pvsExport.ts`.
 ```
 src/
   shared/core/   dimension-agnostic compiler (generic over the geometry; see geometry.ts)
+  shared/app/    browser code both editors use (history, compile worker client, UI widgets)
   d2/core/       2D kernel (Vec2, lines, segments, polygons), CSG, portals, export
-  d2/app/        Canvas2D editor
+  d2/app/        Canvas2D editor + compile worker
   d3/core/       3D kernel (Vec3, planes, windings, polyhedra, brushes), CSG, OBJ import, export
   d3/app/        WebGL2 editor + compile worker
 tests/{shared,d2,d3}/   vitest suites
 docs/            algorithm notes
-AGENTS.md        contributor/agent guide · PLAN.md roadmap · PROGRESS.md log
+AGENTS.md        contributor/agent guide · NOTES.md decisions and open TODOs
 ```
 
 ## References
