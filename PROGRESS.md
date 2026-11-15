@@ -2,6 +2,26 @@
 
 Newest first. One entry per session; say what changed, what was verified, what is next.
 
+## 2026-11-15: Session 4, Phase 4 editor parity
+
+Done
+- 2D core: `moveBrushEdge(brush, index, offset)` (half-plane push/pull, analogue of 3D
+  `moveBrushFace`; redundant edges vanish, null on collapse).
+- 2D select tool: click-to-cycle overlapping brushes (`picking.brushesAt`, same logic as 3D),
+  edge push/pull handles (squares at edge midpoints, `edgeHandleAt`, `model.moveEdge`);
+  vertex dots still reshape and take precedence. `Painter.square`.
+- 2D layers `surfaces` (leaf wall pieces coloured current/visible/culled by the probe's PVS)
+  and `hideCulled`, as in 3D.
+- `tests/d2/editing.test.ts`: push/pull, collapse, redundant edge removal, `brushesAt` order,
+  edge handles. 3D: unchanged (already had all of these).
+
+Verified
+- `npm run typecheck` clean; `npm test`: 10 files, 107 tests pass; `npm run build` ok.
+- NOT verified in a browser: try `/2d.html` select tool (cycle, edge drag) and surfaces layer.
+
+Next
+- Open decision: merge the two editor shells further, or keep sharing helpers only.
+
 ## 2026-11-15: Session 3, Phase 3 shared app infrastructure
 
 Done

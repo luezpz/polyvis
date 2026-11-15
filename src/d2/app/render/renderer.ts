@@ -60,6 +60,7 @@ export class Renderer {
     if (layers.brushes) this.drawBrushes(scene.level, scene.selectedId);
     if (result && layers.splitters) this.drawSplitters(result, layers.labels);
     if (result && layers.walls) this.drawWalls(result);
+    if (result && layers.surfaces) this.drawSurfaces(result, scene.view);
     if (result && layers.portals) this.drawPortals(result, scene.view);
     if (result && layers.labels) this.drawLabels(result);
     if (result?.leaks.leaking) this.drawLeaks(result);
@@ -148,6 +149,31 @@ export class Renderer {
       const m = midpoint(w.winding.a, w.winding.b);
       this.painter.line(m, addScaled(m, w.plane.n, tick), { color: COLORS.wallTick, width: 1 });
     }
+  }
+
+  /**
+   * Leaf surfaces (wall pieces per empty leaf, what a game would draw), coloured by the
+   * probed leaf's PVS row: current / visible / culled (hidden entirely with `hideCulled`).
+   * Without a probe (or with the PVS layer off) they are drawn neutral.
+   */
+  private drawSurfaces(result: CompileResult, view: ViewState): void {
+    const p = view.inspect.point;
+    let current = -1;
+    if (p && view.layers.pvs) {
+      const leaf = locateLeaf(result.tree, p);
+      if (result.tree.leaves[leaf].contents === "empty") current = leaf;
+    }
+    const row = current >= 0 ? result.pvs[current] : null;
+    result.surfaces.forEach((surfs, leaf) => {
+      let color: string = COLORS.surface;
+      if (row && leaf === current) color = COLORS.surfaceCurrent;
+      else if (row && row.has(leaf)) color = COLORS.surfaceVisible;
+      else if (row) {
+        if (view.layers.hideCulled) return;
+        color = COLORS.surfaceHidden;
+      }
+      for (const s of surfs) this.painter.line(s.winding.a, s.winding.b, { color, width: 3 });
+    });
   }
 
   private drawPortals(result: CompileResult, view: ViewState): void {

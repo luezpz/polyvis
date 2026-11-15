@@ -10,7 +10,10 @@
  * occluders. Brush order does not matter.
  */
 
-import { type Vec2, convexHull, signedArea, MIN_AREA } from "../math";
+import {
+  type ConvexPolygon, type Vec2, NO_TAG, MIN_AREA,
+  aabbFromPoints, clipPolygon, convexHull, expandAabb, lineFromPoints, polygonFromAabb, signedArea,
+} from "../math";
 
 export type BrushKind = "room" | "solid";
 
@@ -55,7 +58,31 @@ export function makeBoxBrush(id: number, kind: BrushKind, a: Vec2, b: Vec2): Bru
   ]);
 }
 
-export const nextBrushId = (level: Level): number => level.brushes.reduce((m, b) => Math.max(m, b.id), 0) + 1;
+/**
+ * The brush with edge `index` (vertices[index] → vertices[index+1]) pushed outwards along its
+ * normal by `offset` (pulled in if negative); the 2D analogue of 3D `moveBrushFace`.
+ * The brush is treated as an intersection of half-planes, so neighbouring edges keep their
+ * direction and edges that become redundant vanish. Null if the result degenerates.
+ */
+export function moveBrushEdge(brush: Brush, index: number, offset: number): Brush | null {
+  const vs = brush.vertices;
+  const n = vs.length;
+  if (index < 0 || index >= n || !Number.isFinite(offset)) return null;
+  const box = aabbFromPoints(vs);
+  if (!box) return null;
+  // Start from a box large enough to contain the result, then clip by every (inward) edge line.
+  const margin = 1000 * (Math.hypot(box.max.x - box.min.x, box.max.y - box.min.y) + Math.abs(offset) + 1);
+  let poly: ConvexPolygon | null = polygonFromAabb(expandAabb(box, margin));
+  for (let i = 0; i < n && poly; i++) {
+    const a = vs[i], b = vs[(i + 1) % n];
+    const line = lineFromPoints(a, b); // normal = left of a→b = interior of a CCW loop
+    if (!line) continue;
+    poly = clipPolygon(poly, i === index ? { n: line.n, d: line.d - offset } : line, NO_TAG);
+  }
+  return poly ? makeBrush(brush.id, brush.kind, poly.vertices) : null;
+}
+
+export const nextBrushId =(level: Level): number => level.brushes.reduce((m, b) => Math.max(m, b.id), 0) + 1;
 
 export const serializeLevel = (level: Level): string => JSON.stringify(level, null, 2);
 

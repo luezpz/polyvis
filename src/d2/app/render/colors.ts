@@ -27,6 +27,11 @@ export const COLORS = {
   selection: "#ffffff",
   hover: "rgba(255, 255, 255, 0.5)",
   handleFill: "#14161a",
+  handleHot: "#ffd23f",
+  surface: "rgba(232, 232, 232, 0.9)",
+  surfaceCurrent: "#5adc78",
+  surfaceVisible: "#a8f0b8",
+  surfaceHidden: "rgba(255, 255, 255, 0.15)",
   label: "rgba(255, 255, 255, 0.75)",
 } as const;
 

@@ -42,20 +42,20 @@ Pure, dimension-agnostic app code in `src/shared/app`:
 - [x] `BaseViewState<V, L, I>` (shared layers, inspect, snapping, `clearProbe`); 3D adds
       surfaces / hideCulled / fromCamera / work plane.
 
-## Phase 4: Editor feature parity
+## Phase 4: Editor feature parity  ✅
 | feature                                   | 2D | 3D |
 |-------------------------------------------|----|----|
 | select / box / polygon / inspect tools    | x  | x  |
 | undo/redo, autosave, save/open JSON       | x  | x  |
-| click-to-cycle overlapping brushes        |    | x  |
-| face/edge handles (push/pull)             | ?  | x  |
-| surfaces coloured by PVS, hide culled     |    | x  |
+| click-to-cycle overlapping brushes        | x  | x  |
+| face/edge handles (push/pull)             | x (edge squares; plus vertex dots) | x (faces) |
+| surfaces coloured by PVS, hide culled     | x (wall pieces as lines) | x |
 | probe from camera position                | (n/a: 2D probe follows the mouse) | x |
 | compile in a worker                       | x  | x  |
-| raw geometry import                       |    | x (OBJ) |
+| raw geometry import                       | (n/a, user decision) | x (OBJ) |
 | work plane / brush height                 | n/a | x |
-- [ ] Fill the table precisely (audit both editors) and close each 2D gap.
+| vertex drag (reshape)                     | x  | (n/a: brushes are planes) |
+- [x] Table audited; 2D gaps closed (Session 4).
 
 ## Open decisions (ask the user)
-- 2D raw-geometry import format.
 - Whether to merge the two editors' shells (panel/app) further, or keep them separate and only share helpers.

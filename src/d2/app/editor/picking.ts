@@ -1,19 +1,33 @@
 /** Hit-testing helpers for the editor. */
 
-import { type Brush, type Level, type Vec2, type PortalGraph, convexContains, distance, distanceToSegment, signedArea } from "../../core";
+import { type Brush, type Level, type Vec2, type PortalGraph, convexContains, distance, distanceToSegment, midpoint, signedArea } from "../../core";
+
+/** All brushes containing `p`, smallest first (the 2D analogue of 3D `brushesAlongRay`; used to cycle overlaps). */
+export function brushesAt(level: Level, p: Vec2): Brush[] {
+  return level.brushes
+    .filter((b) => convexContains(b.vertices, p))
+    .map((b) => ({ b, area: signedArea(b.vertices) }))
+    .sort((x, y) => x.area - y.area)
+    .map((x) => x.b);
+}
 
 /** The smallest brush containing `p` (small brushes inside big rooms stay clickable). */
 export function brushAt(level: Level, p: Vec2): Brush | null {
-  let best: Brush | null = null;
-  let bestArea = Infinity;
-  for (const b of level.brushes) {
-    if (!convexContains(b.vertices, p)) continue;
-    const area = signedArea(b.vertices);
-    if (area < bestArea) {
-      best = b;
-      bestArea = area;
+  return brushesAt(level, p)[0] ?? null;
+}
+
+/** Index of the edge (vertices[i] → vertices[i+1]) of `brush` whose midpoint handle is within `radius` of `p`, or -1. */
+export function edgeHandleAt(brush: Brush, p: Vec2, radius: number): number {
+  const vs = brush.vertices;
+  let best = -1;
+  let bestDist = radius;
+  vs.forEach((a, i) => {
+    const d = distance(midpoint(a, vs[(i + 1) % vs.length]), p);
+    if (d <= bestDist) {
+      best = i;
+      bestDist = d;
     }
-  }
+  });
   return best;
 }
 

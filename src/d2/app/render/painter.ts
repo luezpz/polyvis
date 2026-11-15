@@ -85,6 +85,20 @@ export class Painter {
     }
   }
 
+  /** Square handle centred on `p` with a half-size in pixels. */
+  square(p: Vec2, halfPx: number, fill: string, stroke?: StrokeStyle): void {
+    const s = this.camera.worldToScreen(p);
+    const { ctx } = this;
+    ctx.beginPath();
+    ctx.rect(s.x - halfPx, s.y - halfPx, halfPx * 2, halfPx * 2);
+    ctx.fillStyle = fill;
+    ctx.fill();
+    if (stroke) {
+      this.applyStroke(stroke);
+      ctx.stroke();
+    }
+  }
+
   /** Text anchored at a world point (centred). */
   text(p: Vec2, text: string, color: string, sizePx = 11, align: CanvasTextAlign = "center"): void {
     const s = this.camera.worldToScreen(p);

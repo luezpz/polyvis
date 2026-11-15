@@ -6,7 +6,7 @@
  * {@link EditorModel.endGesture} so a whole drag becomes one undo step.
  */
 
-import { type Brush, type BrushKind, type Level, type Vec2, emptyLevel, makeBrush, nextBrushId } from "../../core";
+import { type Brush, type BrushKind, type Level, type Vec2, emptyLevel, makeBrush, moveBrushEdge, nextBrushId } from "../../core";
 import { History } from "../../../shared/app/editor/history";
 
 export type ModelChange = "level" | "selection";
@@ -104,6 +104,12 @@ export class EditorModel {
 
   translateBrush(id: number, original: Brush, delta: Vec2): void {
     this.updateBrush(id, { vertices: original.vertices.map((v) => ({ x: v.x + delta.x, y: v.y + delta.y })) });
+  }
+
+  /** Pushes edge `index` of `original` outwards by `offset` (see `moveBrushEdge`); degenerate results are ignored. */
+  moveEdge(id: number, original: Brush, index: number, offset: number): void {
+    const moved = moveBrushEdge(original, index, offset);
+    if (moved) this.updateBrush(id, { vertices: moved.vertices });
   }
 
   removeBrush(id: number): void {
