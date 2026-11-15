@@ -2,6 +2,28 @@
 
 Newest first. One entry per session; say what changed, what was verified, what is next.
 
+## 2026-11-15: Session 3, Phase 3 shared app infrastructure
+
+Done
+- New `src/shared/app`: `editor/history.ts` (moved), `editor/viewState.ts` (`BaseViewState`),
+  `compile/{compileClient,protocol,serveCompiler}.ts` (generic over `D`, `L`),
+  `ui/{dom,widgets,compileSections}.ts`, `ui/styles.css` (base), `render/palette.ts`.
+- 2D now compiles in a Web Worker (`d2/app/compile`), shows "Compiling…" like 3D. 3D: unchanged behaviour.
+- Both panels build compiler options, export buttons, stats and probe rows from the shared
+  helpers. Small visible changes: 2D stats gain "PVS rows" and the leak's reachable count;
+  3D timings show 2 decimals; 3D layer labels unchanged.
+- `tests/shared/app.test.ts`: history, snapping (2D/3D), `clearProbe`, `hydrateResult`
+  after `structuredClone` (2D/3D), `CompileClient` main-thread fallback + request coalescing.
+
+Verified
+- `npm run typecheck` clean; `npm test`: 9 files, 102 tests pass; `npm run build` bundles
+  both workers.
+- NOT verified in a browser (none available to the agent): smoke-test `/2d.html` (worker
+  compile, panel) and `/3d.html` with `npm run dev`.
+
+Next
+- Phase 4: audit both editors, close 2D gaps.
+
 ## 2026-11-15: Session 2, Phase 2 core parity
 
 Done

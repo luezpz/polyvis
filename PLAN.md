@@ -29,14 +29,18 @@ Status legend: [x] done · [ ] todo · (n/a) not meaningful in that dimension.
       (Deferred: they are 5-line functions over different primitives; sharing needs new
       `Geometry` ops for little gain.)
 
-## Phase 3: Shared app infrastructure
-Pure, dimension-agnostic app code that is currently duplicated or 3D-only:
-- [ ] Move `history.ts` (byte-identical) to `src/shared/app/editor`.
-- [ ] Generic compile worker: `CompileClient`/protocol/worker parameterized by the compiler;
-      2D compiles off the main thread too.
-- [ ] `ui/dom.ts` (2D lacks `pickFile`), `styles.css` common base, colour palette shared parts.
-- [ ] Panel sections built from shared helpers (BSP/flow option fields, stats, timings, export buttons).
-- [ ] Shared `ViewState` core (layers, inspect state, snapping), dimension extras on top.
+## Phase 3: Shared app infrastructure  ✅
+Pure, dimension-agnostic app code in `src/shared/app`:
+- [x] `history.ts` → `src/shared/app/editor/history.ts`.
+- [x] Generic compile worker: `CompileClient<D, L>` + protocol + `serveCompiler` in
+      `src/shared/app/compile`; each dimension has a 6-line `compileWorker.ts` and a
+      `compiler.ts` binding. 2D now compiles off the main thread too.
+- [x] `ui/dom.ts` (incl. `pickFile`), `ui/styles.css` common base (3D adds `#overlay` only),
+      `render/palette.ts` (brush-kind colours, leaf hue).
+- [x] Panel helpers: `ui/widgets.ts` (section/kv/checkbox/number fields) and
+      `ui/compileSections.ts` (compiler options, export buttons, stats + timings, probe rows).
+- [x] `BaseViewState<V, L, I>` (shared layers, inspect, snapping, `clearProbe`); 3D adds
+      surfaces / hideCulled / fromCamera / work plane.
 
 ## Phase 4: Editor feature parity
 | feature                                   | 2D | 3D |
@@ -47,7 +51,7 @@ Pure, dimension-agnostic app code that is currently duplicated or 3D-only:
 | face/edge handles (push/pull)             | ?  | x  |
 | surfaces coloured by PVS, hide culled     |    | x  |
 | probe from camera position                | (n/a: 2D probe follows the mouse) | x |
-| compile in a worker                       |    | x  |
+| compile in a worker                       | x  | x  |
 | raw geometry import                       |    | x (OBJ) |
 | work plane / brush height                 | n/a | x |
 - [ ] Fill the table precisely (audit both editors) and close each 2D gap.

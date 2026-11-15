@@ -7,7 +7,7 @@
  */
 
 import { type Brush, type BrushKind, type Level, type Vec2, emptyLevel, makeBrush, nextBrushId } from "../../core";
-import { History } from "./history";
+import { History } from "../../../shared/app/editor/history";
 
 export type ModelChange = "level" | "selection";
 type Listener = (change: ModelChange) => void;

@@ -1,50 +1,35 @@
 /**
- * View-only state: debug layers, the work plane, snapping, and what the
- * inspect tool is probing. Nothing here affects compilation.
+ * 3D view state: the shared layers / probe / snapping, plus shaded surfaces,
+ * hide-culled, probing from the camera, and the work plane.
  */
 
 import type { Vec3 } from "../../core";
+import { type BaseInspectState, type BaseLayers, BASE_LAYER_LABELS, BaseViewState } from "../../../shared/app/editor/viewState";
 
-export interface Layers {
-  grid: boolean;
+export interface Layers extends BaseLayers {
   surfaces: boolean;
-  brushes: boolean;
-  walls: boolean;
-  leaves: boolean;
-  splitters: boolean;
-  portals: boolean;
-  labels: boolean;
-  pvs: boolean;
   hideCulled: boolean;
-  lineOfSight: boolean;
 }
 
 export const LAYER_LABELS: Record<keyof Layers, string> = {
+  ...BASE_LAYER_LABELS,
   grid: "Grid (work plane)",
   surfaces: "Surfaces (shaded)",
   brushes: "Brush outlines",
   walls: "Wall edges",
   leaves: "BSP leaf cells",
-  splitters: "BSP splitters",
-  portals: "Portals",
-  labels: "Leaf / portal ids",
   pvs: "PVS colouring",
   hideCulled: "Hide culled surfaces",
   lineOfSight: "True line of sight (rays)",
 };
 
-export interface InspectState {
-  /** World point being probed (hover or pinned), or null. */
-  point: Vec3 | null;
-  /** If pinned, hovering no longer moves the probe. */
-  pinned: boolean;
+export interface InspectState extends BaseInspectState<Vec3> {
   /** Probe from the camera position instead (walk through the level and watch the PVS). */
   fromCamera: boolean;
-  /** Portal under the cursor (shows its portal vis), or null. */
-  portal: number | null;
 }
 
-export class ViewState {
+export class ViewState extends BaseViewState<Vec3, Layers, InspectState> {
+  // Key order is the panel order.
   layers: Layers = {
     grid: true,
     surfaces: true,
@@ -65,17 +50,4 @@ export class ViewState {
   workZ = 0;
   /** Height of new brushes (negative = extrude downwards). */
   brushHeight = 3;
-
-  /** Grid / snapping step in world units. */
-  gridSize = 1;
-  snap = true;
-
-  snapValue(v: number): number {
-    if (!this.snap || this.gridSize <= 0) return v;
-    return Math.round(v / this.gridSize) * this.gridSize;
-  }
-
-  snapPoint(p: Vec3): Vec3 {
-    return { x: this.snapValue(p.x), y: this.snapValue(p.y), z: this.snapValue(p.z) };
-  }
 }

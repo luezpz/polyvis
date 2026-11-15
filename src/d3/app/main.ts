@@ -1,5 +1,6 @@
 /** Browser entry point. */
 
+import "../../shared/app/ui/styles.css";
 import "./styles.css";
 import { App } from "./app";
 

@@ -1,6 +1,7 @@
 /** Colour palette for the editor (dark theme). RGBA components are 0..1 for WebGL, CSS strings for the overlay. */
 
 import type { BrushKind } from "../../core";
+import { KIND_HEX, KIND_RGB, leafHue } from "../../../shared/app/render/palette";
 
 export type Rgba = readonly [number, number, number, number];
 
@@ -42,16 +43,16 @@ export const CSS_COLORS = {
 } as const;
 
 export function kindRgba(kind: BrushKind, alpha = 1): Rgba {
-  return kind === "room" ? [0.3, 0.64, 1, alpha] : [1, 0.36, 0.45, alpha];
+  return [...KIND_RGB[kind], alpha];
 }
 
 export function kindCss(kind: BrushKind): string {
-  return kind === "room" ? "#4da3ff" : "#ff5d73";
+  return KIND_HEX[kind];
 }
 
 /** Distinct, stable pastel colour per leaf index (golden-angle hue walk), as RGB 0..1. */
 export function leafRgb(index: number): [number, number, number] {
-  const h = ((index * 137.508) % 360) / 360;
+  const h = leafHue(index) / 360;
   return hslToRgb(h, 0.45, 0.62);
 }
 

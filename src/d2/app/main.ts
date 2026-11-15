@@ -1,6 +1,6 @@
 /** Browser entry point. */
 
-import "./styles.css";
+import "../../shared/app/ui/styles.css";
 import { App } from "./app";
 
 const canvas = document.querySelector<HTMLCanvasElement>("#viewport");

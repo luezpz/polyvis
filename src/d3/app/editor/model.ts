@@ -10,7 +10,7 @@ import {
   type Brush, type BrushKind, type ImportedMesh, type Level, type Point2, type Vec3,
   emptyLevel, makeBoxBrush, makeBrush, makePrismBrush, moveBrushFace, nextBrushId, nextMeshId, translateBrush,
 } from "../../core";
-import { History } from "./history";
+import { History } from "../../../shared/app/editor/history";
 
 export type ModelChange = "level" | "selection";
 type Listener = (change: ModelChange) => void;

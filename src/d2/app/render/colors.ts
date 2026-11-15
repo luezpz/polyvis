@@ -1,6 +1,7 @@
 /** Colour palette for the editor (dark theme). */
 
 import type { BrushKind } from "../../core";
+import { KIND_HEX, leafHue } from "../../../shared/app/render/palette";
 
 export const COLORS = {
   background: "#14161a",
@@ -31,12 +32,11 @@ export const COLORS = {
 
 export function kindColors(kind: BrushKind): { stroke: string; fill: string } {
   return kind === "room"
-    ? { stroke: "#4da3ff", fill: "rgba(77, 163, 255, 0.10)" }
-    : { stroke: "#ff5d73", fill: "rgba(255, 93, 115, 0.28)" };
+    ? { stroke: KIND_HEX.room, fill: "rgba(77, 163, 255, 0.10)" }
+    : { stroke: KIND_HEX.solid, fill: "rgba(255, 93, 115, 0.28)" };
 }
 
 /** Distinct, stable pastel colour per leaf index (golden-angle hue walk). */
 export function leafColor(index: number, alpha = 0.16): string {
-  const hue = (index * 137.508) % 360;
-  return `hsla(${hue.toFixed(1)}, 65%, 60%, ${alpha})`;
+  return `hsla(${leafHue(index).toFixed(1)}, 65%, 60%, ${alpha})`;
 }

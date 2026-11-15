@@ -5,21 +5,29 @@
  * Falls back to compiling on the main thread if workers are unavailable.
  */
 
-import { type CompileOptions, type CompileResult, type Level, compileLevel } from "../../core";
+import type { CompileOptions, CompileResult, Dim } from "../../core";
 import { type CompileRequest, type CompileResponse, hydrateResult } from "./protocol";
 
-export type CompileListener = (result: CompileResult | null, error: string | null, ms: number) => void;
+/** Receives each finished compilation: a result or an error message, and the compile time in ms. */
+export type CompileListener<D extends Dim> = (result: CompileResult<D> | null, error: string | null, ms: number) => void;
 
-export class CompileClient {
+/** How a dimension compiles: its worker (a module calling `serveCompiler`) and the same compiler for the main-thread fallback. */
+export interface CompilerBinding<D extends Dim, L> {
+  /** Creates the worker; must use `new Worker(new URL("./x.ts", import.meta.url))` in the caller's module for Vite. */
+  readonly createWorker: () => Worker;
+  readonly compile: (level: L, options: Partial<CompileOptions>) => CompileResult<D>;
+}
+
+export class CompileClient<D extends Dim, L> {
   private worker: Worker | null = null;
   private inFlight: number | null = null;
-  private pending: { level: Level; options: Partial<CompileOptions> } | null = null;
+  private pending: { level: L; options: Partial<CompileOptions> } | null = null;
   private nextId = 1;
 
-  constructor(private readonly listener: CompileListener) {
+  constructor(private readonly binding: CompilerBinding<D, L>, private readonly listener: CompileListener<D>) {
     try {
-      this.worker = new Worker(new URL("./compileWorker.ts", import.meta.url), { type: "module" });
-      this.worker.onmessage = (e: MessageEvent<CompileResponse>) => this.onResponse(e.data);
+      this.worker = binding.createWorker();
+      this.worker.onmessage = (e: MessageEvent<CompileResponse<D>>) => this.onResponse(e.data);
       this.worker.onerror = (e) => {
         console.error("Compile worker failed, falling back to the main thread", e);
         this.worker?.terminate();
@@ -38,7 +46,8 @@ export class CompileClient {
     return this.inFlight !== null || this.pending !== null;
   }
 
-  request(level: Level, options: Partial<CompileOptions>): void {
+  /** Queues a compile of `level`, replacing any queued (not yet started) one. */
+  request(level: L, options: Partial<CompileOptions>): void {
     this.pending = { level, options };
     if (this.inFlight === null) this.flush();
   }
@@ -53,7 +62,7 @@ export class CompileClient {
       setTimeout(() => {
         const t0 = performance.now();
         try {
-          const result = compileLevel(job.level, job.options);
+          const result = this.binding.compile(job.level, job.options);
           this.inFlight = null;
           this.listener(result, null, performance.now() - t0);
         } catch (e) {
@@ -66,11 +75,11 @@ export class CompileClient {
     }
     const id = this.nextId++;
     this.inFlight = id;
-    const msg: CompileRequest = { id, level: job.level, options: job.options };
+    const msg: CompileRequest<L> = { id, level: job.level, options: job.options };
     this.worker.postMessage(msg);
   }
 
-  private onResponse(res: CompileResponse): void {
+  private onResponse(res: CompileResponse<D>): void {
     if (res.id !== this.inFlight) return;
     this.inFlight = null;
     // Deliver even if newer work is pending: a slightly stale result beats a blank view.

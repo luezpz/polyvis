@@ -40,6 +40,11 @@ src/d2/core/          2D kernel: Vec2, Line2, Segment, ConvexPolygon; CSG; porta
                       2D antipenumbra; geometry.ts (geometry2); pipeline binding; export
 src/d3/core/          3D kernel: Vec3, Plane3, Winding, ConvexPolyhedron, brushes as planes;
                       CSG + mesh walls; OBJ import; 3D antipenumbra; geometry.ts (geometry3)
+src/shared/app/        browser code shared by both editors (never imported by core)
+  editor/             history, BaseViewState (layers, probe, snapping)
+  compile/            CompileClient<D, L>, worker protocol + hydrateResult, serveCompiler
+  ui/                 dom helpers, panel widgets, compile panel sections, base styles.css
+  render/palette.ts   brush-kind colours, leaf hue
 src/d2/app, src/d3/app   editors (separate on purpose; see PLAN.md for sharing candidates)
 tests/shared          Geometry contract tests run against both kernels
 tests/d2, tests/d3    per-dimension suites (ported verbatim from polyvis2d / polyvis3d)
@@ -58,7 +63,7 @@ Apps and tests only import their own dimension's barrel; they never pass a `Geom
 | an algorithm over planes/facets/cells (BSP, vis, PVS)   | `src/shared/core`, generic   |
 | a new primitive operation that algorithm needs          | add it to `Geometry<D>`, implement in **both** `d2/core/geometry.ts` and `d3/core/geometry.ts`, cover it in `tests/shared` |
 | CSG, portal discovery, import formats, export layout    | `src/d{2,3}/core`            |
-| UI / rendering                                          | `src/d{2,3}/app`             |
+| UI / rendering                                          | `src/d{2,3}/app`; parts both editors use in `src/shared/app` |
 
 Every feature landing in one dimension gets a PROGRESS.md line saying whether the other
 dimension has it; parity gaps are tracked in PLAN.md.
@@ -66,11 +71,11 @@ dimension has it; parity gaps are tracked in PLAN.md.
 ## Architecture rules
 
 - `src/*/core/` is a **pure library**: no DOM, no globals, no app imports. Runs in Node and
-  workers. Dependency direction: `d2|d3/app → d2|d3/core → shared/core`. Never the reverse;
+  workers. Dependency direction: `d2|d3/app → d2|d3/core → shared/core`, and `d2|d3/app → shared/app → shared/core`. Never the reverse;
   `shared` never imports `d2`/`d3`.
 - `Geometry` functions must not use `this` (hot loops destructure them).
-- 3D results cross the worker boundary by structured clone; class instances (`BitSet`) are
-  restored in `d3/app/compile/protocol.ts`; update it if you add any.
+- Compile results (both dimensions) cross the worker boundary by structured clone; class instances (`BitSet`) are
+  restored in `shared/app/compile/protocol.ts`; update it if you add any.
 - Data between stages is immutable (`readonly`). Levels are immutable values.
 - Small single-purpose modules; every exported function/type has a doc comment stating
   conventions (orientation, units, null cases).

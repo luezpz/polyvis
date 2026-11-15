@@ -19,8 +19,8 @@ import { PolygonTool } from "./editor/tools/polygonTool";
 import { InspectTool } from "./editor/tools/inspectTool";
 import { type Probe, Renderer } from "./render/renderer";
 import { Panel, type PanelHost } from "./ui/panel";
-import { downloadText, pickFile, pickTextFile } from "./ui/dom";
-import { CompileClient } from "./compile/compileClient";
+import { downloadText, pickFile, pickTextFile } from "../../shared/app/ui/dom";
+import { createCompileClient } from "./compile/compiler";
 
 const AUTOSAVE_KEY = "polyvis3d.level.v1";
 const FLY_KEYS = new Set(["KeyW", "KeyA", "KeyS", "KeyD", "KeyQ", "KeyE"]);
@@ -37,7 +37,7 @@ export class App implements PanelHost, ToolContext {
   private _activeTool: Tool;
   private readonly renderer: Renderer;
   private readonly panel: Panel;
-  private readonly compiler: CompileClient;
+  private readonly compiler: ReturnType<typeof createCompileClient>;
   private result: CompileResult | null = null;
   private error: string | null = null;
   private frameRequested = false;
@@ -52,7 +52,7 @@ export class App implements PanelHost, ToolContext {
     this.tools = [new SelectTool(this), new BoxTool(this), new PolygonTool(this), new InspectTool(this)];
     this._activeTool = this.tools[0];
     this.renderer = new Renderer(canvas, overlay, this.camera);
-    this.compiler = new CompileClient((result, error) => {
+    this.compiler = createCompileClient((result, error) => {
       if (result) this.result = result;
       this.error = error;
       this.requestRender();
@@ -138,7 +138,7 @@ export class App implements PanelHost, ToolContext {
     const sample = SAMPLE_LEVELS[index];
     if (!sample) return;
     this.model.loadLevel(sample.create(), true);
-    this.view.inspect = { ...this.view.inspect, point: null, pinned: false, portal: null };
+    this.view.clearProbe();
     this.fitView();
   }
 

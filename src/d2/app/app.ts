@@ -9,7 +9,7 @@
 
 import {
   type CompileOptions, type CompileResult, type Vec2,
-  DEFAULT_COMPILE_OPTIONS, SAMPLE_LEVELS, aabbFromPoints, compileLevel, emptyLevel,
+  DEFAULT_COMPILE_OPTIONS, SAMPLE_LEVELS, aabbFromPoints, emptyLevel,
   exportPvsJson, exportPvsText, parseLevel, serializeLevel,
 } from "../core";
 import { Camera } from "./editor/camera";
@@ -22,7 +22,8 @@ import { PolygonTool } from "./editor/tools/polygonTool";
 import { InspectTool } from "./editor/tools/inspectTool";
 import { Renderer } from "./render/renderer";
 import { Panel, type PanelHost } from "./ui/panel";
-import { downloadText, pickTextFile } from "./ui/dom";
+import { createCompileClient } from "./compile/compiler";
+import { downloadText, pickTextFile } from "../../shared/app/ui/dom";
 
 const AUTOSAVE_KEY = "polyvis.level.v1";
 
@@ -38,7 +39,7 @@ export class App implements PanelHost, ToolContext {
   private readonly panel: Panel;
   private result: CompileResult | null = null;
   private error: string | null = null;
-  private compileScheduled = false;
+  private readonly compiler: ReturnType<typeof createCompileClient>;
   private frameRequested = false;
   private panning: { pointerId: number; last: Vec2 } | null = null;
   private spaceHeld = false;
@@ -48,6 +49,13 @@ export class App implements PanelHost, ToolContext {
     this.tools = [new SelectTool(this), new BoxTool(this), new PolygonTool(this), new InspectTool(this)];
     this._activeTool = this.tools[0];
     this.renderer = new Renderer(canvas, this.camera);
+    this.compiler = createCompileClient((result, error) => {
+      // Keep the last good result on error so the view does not go blank mid-edit.
+      if (result) this.result = result;
+      else if (error) console.error(error);
+      this.error = error;
+      this.requestRender();
+    });
     this.panel = new Panel(panelRoot, this);
 
     this.model.onChange((change) => {
@@ -73,6 +81,11 @@ export class App implements PanelHost, ToolContext {
 
   get activeTool(): Tool {
     return this._activeTool;
+  }
+
+  /** True while a compile is running or queued. */
+  get compiling(): boolean {
+    return this.compiler.busy;
   }
 
   compiled(): CompileResult | null {
@@ -117,7 +130,7 @@ export class App implements PanelHost, ToolContext {
     const sample = SAMPLE_LEVELS[index];
     if (!sample) return;
     this.model.loadLevel(sample.create(), true);
-    this.view.inspect = { point: null, pinned: false, portal: null };
+    this.view.clearProbe();
     this.fitView();
   }
 
@@ -157,20 +170,8 @@ export class App implements PanelHost, ToolContext {
   // ---- Compilation & persistence -----------------------------------------
 
   private scheduleCompile(): void {
-    if (this.compileScheduled) return;
-    this.compileScheduled = true;
-    queueMicrotask(() => {
-      this.compileScheduled = false;
-      try {
-        this.result = compileLevel(this.model.level, this.options);
-        this.error = null;
-      } catch (e) {
-        console.error(e);
-        this.result = null;
-        this.error = (e as Error).message;
-      }
-      this.requestRender();
-    });
+    this.compiler.request(this.model.level, this.options);
+    this.requestRender();
   }
 
   private autosave(): void {
