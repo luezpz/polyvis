@@ -10,6 +10,12 @@ only decisions, gotchas and open items. The 2D/3D merge (former PLAN.md / PROGRE
   different primitives; sharing would need new `Geometry` ops for little gain.
 - Intentional parity gaps: probe-from-camera and work plane / brush height are 3D-only;
   vertex drag is 2D-only (3D brushes are planes).
+- Corner splits stay local: a wall is a candidate only for cells it touches itself. 3D touch
+  must count point/edge contacts (`d3/core/bsp/refine.ts` clips raw vertices, not
+  `clipWinding`, which drops zero-area remnants); cells beside a doorway often meet the lintel or
+  jamb only that way. Rejected: inheriting candidates down the refinement recursion (planes
+  from far walls cut whole rooms: "Two storeys" upper room); accepting walls whose extension
+  reaches the cell (branch `proto/corner-split-extension`, about 2x the cells).
 
 ## Gotchas
 - Git history of the source repos (`polyvis2d` cdac3e9, `polyvis3d` 2de2526) was not carried over.

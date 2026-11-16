@@ -62,7 +62,8 @@ Unchanged from 2D apart from the primitives:
 **Empty-leaf refinement** (`shared/core/bsp/refine.ts`), in 3D:
 
 - `cornerSplits`: any wall that **touches the cell** (its polygon comes within `PROBE_OFFSET`
-  of the cell, tested by clipping it to the cell's faces pushed outwards) and whose plane cuts
+  of the cell, tested by clipping it to the cell's faces pushed outwards; a single point or
+  edge of contact counts) and whose plane cuts
   through the cell is a candidate; the most balanced wins. In 3D this captures vertical door
   jambs, lintels, balcony lips and the tops of low blocks, i.e. the reflex edges of the empty
   space where the view changes.
