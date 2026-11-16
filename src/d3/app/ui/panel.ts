@@ -6,13 +6,13 @@
 
 import {
   type BrushKind, type CompileOptions, type CompileResult,
-  DEFAULT_BSP_OPTIONS, SAMPLE_LEVELS, brushVolume, locateLeaf,
+  DEFAULT_BSP_OPTIONS, ALL_LEVELS, brushVolume, locateLeaf,
 } from "../../core";
 import type { EditorModel } from "../editor/model";
 import { type Layers, LAYER_LABELS, type ViewState } from "../editor/viewState";
 import type { Tool, ToolId } from "../editor/tools/tool";
 import { h } from "../../../shared/app/ui/dom";
-import { checkbox, kv, numberInput, section } from "../../../shared/app/ui/widgets";
+import { checkbox, kv, levelSelect, numberInput, section } from "../../../shared/app/ui/widgets";
 import { compilerOptionsSection, exportButtons, probeRows, statsRows } from "../../../shared/app/ui/compileSections";
 
 /** What the panel needs from the application. */
@@ -76,11 +76,11 @@ export class Panel {
     this.undoButton = h("button", { onclick: () => model.undo(), title: "Ctrl+Z" }, "Undo");
     this.redoButton = h("button", { onclick: () => model.redo(), title: "Ctrl+Y / Ctrl+Shift+Z" }, "Redo");
 
-    const sampleSelect = h("select", {}, ...SAMPLE_LEVELS.map((s, i) => h("option", { value: i, title: s.description }, s.name)));
+    const sampleSelect = levelSelect(ALL_LEVELS);
     const level = h("div", { class: "stack" },
       h("div", { class: "button-row" },
         sampleSelect,
-        h("button", { onclick: () => host.loadSample(Number(sampleSelect.value)) }, "Load sample"),
+        h("button", { onclick: () => host.loadSample(Number(sampleSelect.value)) }, "Load"),
       ),
       h("div", { class: "button-row" },
         h("button", { onclick: () => host.newLevel() }, "New"),

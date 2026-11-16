@@ -37,6 +37,7 @@ src/shared/core/      dimension-agnostic compiler, generic over D extends Dim
   vis/                BitSet, base vis, portal flow (+ exact parallel dependency scheduler), leaf PVS, shared PVS rows
   pipeline.ts         createCompiler(config) → { compileLevel, compileWalls }
   export/pvsRows.ts   decodePvsRow
+  gen/maze.ts         seeded RNG + maze generator for demo levels
 src/d2/core/          2D kernel: Vec2, Line2, Segment, ConvexPolygon; CSG; portal discovery;
                       2D antipenumbra; line-of-sight analysis; geometry.ts (geometry2);
                       pipeline binding; export

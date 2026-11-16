@@ -1,36 +1,12 @@
 /** Built-in sample levels used by the editor and the test-suite. */
 
-import { type Brush, type BrushKind, type Level, LEVEL_FORMAT, LEVEL_VERSION, makeBoxBrush, makeBrush } from "./level";
-import type { Vec2 } from "../math";
+import type { Level } from "./level";
+import { build, ngon, room, solid } from "./builder";
 
-type BrushSpec =
-  | { kind: BrushKind; box: [number, number, number, number] }
-  | { kind: BrushKind; points: Vec2[] };
-
-function build(specs: BrushSpec[]): Level {
-  const brushes: Brush[] = [];
-  specs.forEach((s, i) => {
-    const b = "box" in s
-      ? makeBoxBrush(i + 1, s.kind, { x: s.box[0], y: s.box[1] }, { x: s.box[2], y: s.box[3] })
-      : makeBrush(i + 1, s.kind, s.points);
-    if (b) brushes.push(b);
-  });
-  return { format: LEVEL_FORMAT, version: LEVEL_VERSION, brushes };
-}
-
-/** Regular polygon helper. */
-function ngon(cx: number, cy: number, r: number, sides: number, phase = 0): Vec2[] {
-  return Array.from({ length: sides }, (_, i) => {
-    const a = phase + (i / sides) * Math.PI * 2;
-    return { x: Math.round((cx + Math.cos(a) * r) * 1000) / 1000, y: Math.round((cy + Math.sin(a) * r) * 1000) / 1000 };
-  });
-}
-
-const room = (x0: number, y0: number, x1: number, y1: number): BrushSpec => ({ kind: "room", box: [x0, y0, x1, y1] });
-const solid = (x0: number, y0: number, x1: number, y1: number): BrushSpec => ({ kind: "solid", box: [x0, y0, x1, y1] });
-
+/** A named level factory; `group` sorts demos in the editor's picker. */
 export interface SampleLevel {
   readonly name: string;
+  readonly group?: string;
   readonly description: string;
   readonly create: () => Level;
 }

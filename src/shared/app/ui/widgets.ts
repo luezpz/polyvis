@@ -33,3 +33,20 @@ export function numberInput(value: number, onChange: (v: number) => void, min = 
 export function numberField(label: string, value: number, onChange: (v: number) => void, title?: string): HTMLElement {
   return h("label", { class: "field", ...(title ? { title } : {}) }, h("span", {}, label), numberInput(value, onChange));
 }
+
+/**
+ * A `<select>` over a level catalog; option values are indices into `levels`. Entries with a
+ * `group` are placed in an `<optgroup>` of that name (in first-seen order), ungrouped ones first.
+ */
+export function levelSelect(levels: readonly { name: string; description: string; group?: string }[]): HTMLSelectElement {
+  const select = h("select", {});
+  const groups = new Map<string, HTMLOptGroupElement>();
+  levels.forEach((s, i) => {
+    const option = h("option", { value: i, title: s.description }, s.name);
+    if (!s.group) { select.append(option); return; }
+    let g = groups.get(s.group);
+    if (!g) { g = h("optgroup", { label: s.group }); groups.set(s.group, g); select.append(g); }
+    g.append(option);
+  });
+  return select;
+}

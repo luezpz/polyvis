@@ -6,7 +6,7 @@
 
 import {
   type Aabb, type CompileOptions, type CompileResult,
-  DEFAULT_COMPILE_OPTIONS, SAMPLE_LEVELS, aabbFromPoints, brushVertices, emptyLevel, exportPvsJson, exportPvsText,
+  DEFAULT_COMPILE_OPTIONS, SAMPLE_LEVELS, ALL_LEVELS, aabbFromPoints, brushVertices, emptyLevel, exportPvsJson, exportPvsText,
   importObj, locateLeaf, parseLevel, serializeLevel,
 } from "../core";
 import { Camera, type ScreenPoint, rayPlaneZ } from "./editor/camera";
@@ -135,7 +135,7 @@ export class App implements PanelHost, ToolContext {
   }
 
   loadSample(index: number): void {
-    const sample = SAMPLE_LEVELS[index];
+    const sample = ALL_LEVELS[index];
     if (!sample) return;
     this.model.loadLevel(sample.create(), true);
     this.view.clearProbe();

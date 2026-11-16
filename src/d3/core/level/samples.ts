@@ -1,59 +1,12 @@
 /** Built-in sample levels used by the editor and the test-suite. Z is up; 1 unit ≈ 1 m. */
 
-import { type Brush, type BrushKind, type Point2, makeBoxBrush, makeBrush, makePrismBrush } from "./brush";
-import { type Level, LEVEL_FORMAT, LEVEL_VERSION } from "./level";
-import type { Plane3 } from "../math";
+import type { Level } from "./level";
+import { build, ngon, ramp, room, solid } from "./builder";
 
-type BrushSpec =
-  | { kind: BrushKind; box: [number, number, number, number, number, number] }
-  | { kind: BrushKind; prism: Point2[]; z0: number; z1: number }
-  | { kind: BrushKind; planes: Plane3[] };
-
-function build(specs: BrushSpec[]): Level {
-  const brushes: Brush[] = [];
-  specs.forEach((s, i) => {
-    const id = i + 1;
-    const b = "box" in s
-      ? makeBoxBrush(id, s.kind, { x: s.box[0], y: s.box[1], z: s.box[2] }, { x: s.box[3], y: s.box[4], z: s.box[5] })
-      : "prism" in s
-        ? makePrismBrush(id, s.kind, s.prism, s.z0, s.z1)
-        : makeBrush(id, s.kind, s.planes);
-    if (b) brushes.push(b);
-  });
-  return { format: LEVEL_FORMAT, version: LEVEL_VERSION, brushes, meshes: [] };
-}
-
-const room = (x0: number, y0: number, z0: number, x1: number, y1: number, z1: number): BrushSpec => ({ kind: "room", box: [x0, y0, z0, x1, y1, z1] });
-const solid = (x0: number, y0: number, z0: number, x1: number, y1: number, z1: number): BrushSpec => ({ kind: "solid", box: [x0, y0, z0, x1, y1, z1] });
-
-/** Regular polygon footprint helper. */
-function ngon(cx: number, cy: number, r: number, sides: number, phase = 0): Point2[] {
-  return Array.from({ length: sides }, (_, i) => {
-    const a = phase + (i / sides) * Math.PI * 2;
-    return { x: Math.round((cx + Math.cos(a) * r) * 1000) / 1000, y: Math.round((cy + Math.sin(a) * r) * 1000) / 1000 };
-  });
-}
-
-/**
- * Solid ramp rising along +y from height 0 at `y0` to `h` at `y1`, between `x0` and `x1`, standing on `z`.
- * Built from planes because it is not a vertical prism.
- */
-function ramp(x0: number, x1: number, y0: number, y1: number, z: number, h: number): BrushSpec {
-  const slope = { x: 0, y: -h, z: y1 - y0 }; // outward normal of the sloped top (not unit)
-  return {
-    kind: "solid",
-    planes: [
-      { n: { x: 0, y: 0, z: -1 }, d: -z },
-      { n: { x: -1, y: 0, z: 0 }, d: -x0 },
-      { n: { x: 1, y: 0, z: 0 }, d: x1 },
-      { n: { x: 0, y: 1, z: 0 }, d: y1 },
-      { n: slope, d: slope.y * y0 + slope.z * z },
-    ],
-  };
-}
-
+/** A named level factory; `group` sorts demos in the editor's picker. */
 export interface SampleLevel {
   readonly name: string;
+  readonly group?: string;
   readonly description: string;
   readonly create: () => Level;
 }

@@ -37,6 +37,11 @@ only decisions, gotchas and open items. The 2D/3D merge (former PLAN.md / PROGRE
   worse with 8+ (serial setup ~75 ms, top walk); so capped at 4 (`bspPool.ts`), used from 300
   walls. BSP is only ~1-2% of a big compile; base vis (single-threaded) dominates there.
   Editors share one nested pool (`shared/app/compile/workerPool.ts`, entry `poolWorker.ts`).
+- Levels: `SAMPLE_LEVELS` (basic, used by every test suite) vs `DEMO_LEVELS` (`level/demos.ts`,
+  grouped Heavy / Worst case / Edge case; only the cheap ones are tested, in `tests/d*/demos.test.ts`).
+  Editors list `ALL_LEVELS` via `levelSelect` (optgroups). Writing helpers live in `level/builder.ts`;
+  seeded maze/RNG in `shared/core/gen`. Single-threaded Node times: 2D Pillar forest ~11 s; 3D
+  Oblique lattice ~110 s, almost all portal flow (near-total visibility over short pillars).
 
 ## Gotchas
 - Git history of the source repos (`polyvis2d` cdac3e9, `polyvis3d` 2de2526) was not carried over.
