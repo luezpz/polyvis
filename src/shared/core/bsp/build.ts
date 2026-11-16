@@ -25,7 +25,7 @@
 import type { Cell, Dim, Facet, Geometry, Plane } from "../geometry";
 import { Side } from "../math";
 import type { Wall } from "../wall";
-import { type RefineOptions, type RefineWall, chooseRefineSplit, cornerCandidates, refinementEnabled, prepareRefineWalls } from "./refine";
+import { type RefineOptions, chooseRefineSplit, refinementEnabled, prepareRefineWalls } from "./refine";
 import { type BspLeaf, type BspNode, type BspStats, type BspTree, type ChildRef, type LeafContents, BOUNDS_TAG, leafRef } from "./types";
 
 export interface BspBuildOptions extends RefineOptions {
@@ -78,23 +78,16 @@ export function buildBsp<D extends Dim>(g: Geometry<D>, walls: readonly Wall<D>[
     return leafRef(leaves.length - 1);
   };
 
-  /**
-   * Empty space: either refine it with extra splits or close it off as an empty leaf.
-   * `inherited`: corner-split candidates of the regions this one was cut from.
-   * The region's own touching walls are added too: point/edge contacts sit at
-   * the touch tolerance and can show up only on the smaller cell.
-   */
-  const buildEmpty = (region: Cell<D> | null, depth: number, inherited: readonly RefineWall<D>[] = []): ChildRef => {
-    if (!region || !refinementEnabled(opts)) return addLeaf("empty", region, depth);
-    const candidates = [...new Set([...inherited, ...cornerCandidates(g, region, refineWalls, opts)])];
-    const plane = chooseRefineSplit(g, region, candidates, opts);
-    if (!plane) return addLeaf("empty", region, depth);
+  /** Empty space: either refine it with extra splits or close it off as an empty leaf. */
+  const buildEmpty = (region: Cell<D> | null, depth: number): ChildRef => {
+    const plane = region && refinementEnabled(opts) ? chooseRefineSplit(g, region, refineWalls, opts) : null;
+    if (!plane || !region) return addLeaf("empty", region, depth);
     const planeIndex = internPlane(g, planes, plane);
     refineSplitCount++;
     const nodeIndex = nodes.length;
     nodes.push(null as unknown as BspNode<D>);
-    const front = buildEmpty(g.clipCell(region, plane, planeIndex), depth + 1, candidates);
-    const back = buildEmpty(g.clipCell(region, g.flipPlane(plane), planeIndex), depth + 1, candidates);
+    const front = buildEmpty(g.clipCell(region, plane, planeIndex), depth + 1);
+    const back = buildEmpty(g.clipCell(region, g.flipPlane(plane), planeIndex), depth + 1);
     nodes[nodeIndex] = { plane: planeIndex, front, back, region };
     return nodeIndex;
   };
