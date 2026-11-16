@@ -22,11 +22,11 @@
  * later.
  */
 
-import type { Cell, Dim, Facet, Geometry, Plane } from "../geometry";
+import type { Bounds, Cell, Dim, Facet, Geometry, Plane } from "../geometry";
 import { Side } from "../math";
 import type { Wall } from "../wall";
-import { type RefineOptions, chooseRefineSplit, refinementEnabled, prepareRefineWalls } from "./refine";
-import { type BspLeaf, type BspNode, type BspStats, type BspTree, type ChildRef, type LeafContents, BOUNDS_TAG, leafRef } from "./types";
+import { type RefineOptions, type RefineWall, chooseRefineSplit, refinementEnabled, prepareRefineWalls } from "./refine";
+import { type BspLeaf, type BspNode, type BspStats, type BspTree, type ChildRef, type LeafContents, BOUNDS_TAG, isLeafRef, leafRef, refToLeaf } from "./types";
 
 export interface BspBuildOptions extends RefineOptions {
   /** Cost of each wall split when scoring a candidate splitter. */
@@ -37,7 +37,8 @@ export interface BspBuildOptions extends RefineOptions {
   readonly boundsMargin: number;
 }
 
-interface Fragment<D extends Dim> {
+/** A wall piece still to be placed; `plane` indexes the tree's planes (always a wall plane). */
+export interface Fragment<D extends Dim> {
   readonly winding: Facet<D>;
   readonly plane: number;
 }
@@ -54,35 +55,105 @@ export interface BspBuildResult<D extends Dim> {
 }
 
 /**
+ * Everything a subtree build needs, identical on every thread. `planes` holds
+ * the interned wall planes; refinement planes a subtree adds get indices
+ * `planes.length + k` (k = position in {@link Subtree.newPlanes}).
+ */
+export interface BuildContext<D extends Dim> {
+  readonly planes: readonly Plane<D>[];
+  readonly fragments: readonly Fragment<D>[];
+  readonly bounds: Bounds<D>;
+  readonly rootRegion: Cell<D>;
+  readonly refineWalls: readonly RefineWall<D>[];
+  readonly opts: BspBuildOptions;
+}
+
+/**
+ * Work for one independent subtree: wall fragments still to place, an empty
+ * region (refinement only), or a solid region (a single leaf).
+ */
+export type SubtreeTask<D extends Dim> =
+  | { readonly kind: "walls"; readonly frags: readonly Fragment<D>[]; readonly region: Cell<D> | null; readonly depth: number }
+  | { readonly kind: "empty" | "solid"; readonly region: Cell<D> | null; readonly depth: number };
+
+/**
+ * A subtree in local numbering: `nodes` / `leaves` in the order the
+ * sequential build would emit them (preorder, front first), child refs local,
+ * plane indices and region tags `>= ctx.planes.length` local to `newPlanes`.
+ */
+export interface Subtree<D extends Dim> {
+  readonly newPlanes: readonly Plane<D>[];
+  readonly nodes: readonly BspNode<D>[];
+  readonly leaves: readonly BspLeaf<D>[];
+  readonly root: ChildRef;
+  readonly splitCount: number;
+  readonly refineSplitCount: number;
+}
+
+/**
+ * Top of a tree built elsewhere: wall-split nodes (in global plane numbering,
+ * which only uses wall planes) down to finished subtrees. `splits` = wall
+ * fragments split at that node.
+ */
+export type Skeleton<D extends Dim> =
+  | { readonly kind: "node"; readonly plane: number; readonly region: Cell<D> | null; readonly splits: number; readonly front: Skeleton<D>; readonly back: Skeleton<D> }
+  | { readonly kind: "subtree"; readonly tree: Subtree<D> };
+
+/**
  * Builds the tree for `walls` (empty space in front of each).
  * `opts` must be complete; each dimension supplies its own defaults.
+ * See `parallelBuild.ts` for the multi-threaded version (same result).
  */
 export function buildBsp<D extends Dim>(g: Geometry<D>, walls: readonly Wall<D>[], opts: BspBuildOptions): BspBuildResult<D> {
+  const ctx = prepareBuild(g, walls, opts);
+  return assembleTree(g, ctx, { kind: "subtree", tree: buildSubtree(g, ctx, rootTask(ctx)) });
+}
+
+/** Interns the wall planes and computes the bounds and root region. */
+export function prepareBuild<D extends Dim>(g: Geometry<D>, walls: readonly Wall<D>[], opts: BspBuildOptions): BuildContext<D> {
   const planes: Plane<D>[] = [];
   const fragments: Fragment<D>[] = walls.map((w) => ({ winding: w.winding, plane: internPlane(g, planes, w.plane) }));
-
   const points = walls.flatMap((w) => g.facetPoints(w.winding));
   const bounds = g.expandBounds(g.boundsOf(points) ?? { min: g.zero, max: g.zero }, opts.boundsMargin);
   const rootRegion = g.cellFromBounds(bounds, BOUNDS_TAG);
+  const refineWalls = refinementEnabled(opts) ? prepareRefineWalls(g, walls) : [];
+  return { planes, fragments, bounds, rootRegion, refineWalls, opts };
+}
 
+/** The task for the whole tree. */
+export function rootTask<D extends Dim>(ctx: BuildContext<D>): SubtreeTask<D> {
+  return ctx.fragments.length > 0
+    ? { kind: "walls", frags: ctx.fragments, region: ctx.rootRegion, depth: 0 }
+    : { kind: "solid", region: ctx.rootRegion, depth: 0 };
+}
+
+/** Builds one subtree (the classic recursion of the module docs) in local numbering. */
+export function buildSubtree<D extends Dim>(g: Geometry<D>, ctx: BuildContext<D>, task: SubtreeTask<D>): Subtree<D> {
+  const { opts } = ctx;
+  const newPlanes: Plane<D>[] = [];
   const nodes: BspNode<D>[] = [];
   const leaves: BspLeaf<D>[] = [];
   let splitCount = 0;
   let refineSplitCount = 0;
-  const refineWalls = refinementEnabled(opts) ? prepareRefineWalls(g, walls) : [];
-  let maxDepth = 0;
+  const planeAt = (i: number): Plane<D> => (i < ctx.planes.length ? ctx.planes[i] : newPlanes[i - ctx.planes.length]);
+
+  /** Same lookup order as interning into one global list: wall planes, then this subtree's. */
+  const intern = (plane: Plane<D>): number => {
+    const i = ctx.planes.findIndex((p) => g.sameOrientedPlane(p, plane));
+    if (i >= 0) return i;
+    return ctx.planes.length + internPlane(g, newPlanes, plane);
+  };
 
   const addLeaf = (contents: LeafContents, region: Cell<D> | null, depth: number): ChildRef => {
     leaves.push({ contents, region, depth });
-    maxDepth = Math.max(maxDepth, depth);
     return leafRef(leaves.length - 1);
   };
 
   /** Empty space: either refine it with extra splits or close it off as an empty leaf. */
   const buildEmpty = (region: Cell<D> | null, depth: number): ChildRef => {
-    const plane = region && refinementEnabled(opts) ? chooseRefineSplit(g, region, refineWalls, opts) : null;
+    const plane = region && refinementEnabled(opts) ? chooseRefineSplit(g, region, ctx.refineWalls, opts) : null;
     if (!plane || !region) return addLeaf("empty", region, depth);
-    const planeIndex = internPlane(g, planes, plane);
+    const planeIndex = intern(plane);
     refineSplitCount++;
     const nodeIndex = nodes.length;
     nodes.push(null as unknown as BspNode<D>);
@@ -93,9 +164,9 @@ export function buildBsp<D extends Dim>(g: Geometry<D>, walls: readonly Wall<D>[
   };
 
   const build = (frags: readonly Fragment<D>[], region: Cell<D> | null, depth: number): ChildRef => {
-    const planeIndex = chooseSplitter(g, frags, planes, opts);
-    const plane = planes[planeIndex];
-    const part = partition(g, frags, planeIndex, planes);
+    const planeIndex = chooseSplitter(g, frags, ctx.planes, opts);
+    const plane = planeAt(planeIndex);
+    const part = partition(g, frags, planeIndex, ctx.planes);
     splitCount += part.splits;
 
     // Reserve the node slot first so parents get lower indices than children (nicer for export/debugging).
@@ -109,9 +180,53 @@ export function buildBsp<D extends Dim>(g: Geometry<D>, walls: readonly Wall<D>[
     return nodeIndex;
   };
 
-  const root = fragments.length > 0 ? build(fragments, rootRegion, 0) : addLeaf("solid", rootRegion, 0);
+  const root = task.kind === "walls" ? build(task.frags, task.region, task.depth)
+    : task.kind === "empty" ? buildEmpty(task.region, task.depth)
+    : addLeaf("solid", task.region, task.depth);
+  return { newPlanes, nodes, leaves, root, splitCount, refineSplitCount };
+}
 
-  const tree: BspTree<D> = { planes, nodes, leaves, root, bounds };
+/**
+ * Flattens a skeleton into a tree, splicing subtrees in preorder (front
+ * first) so node, leaf and plane numbering match the sequential build: each
+ * subtree's new planes are interned into the global list in their creation
+ * order, and its plane indices, region tags and child refs are shifted.
+ */
+export function assembleTree<D extends Dim>(g: Geometry<D>, ctx: BuildContext<D>, skeleton: Skeleton<D>): BspBuildResult<D> {
+  const planes: Plane<D>[] = [...ctx.planes];
+  const base = ctx.planes.length;
+  const nodes: BspNode<D>[] = [];
+  const leaves: BspLeaf<D>[] = [];
+  let splitCount = 0;
+  let refineSplitCount = 0;
+
+  const splice = (t: Subtree<D>): ChildRef => {
+    const planeMap = t.newPlanes.map((p) => internPlane(g, planes, p));
+    const identity = planeMap.every((m, k) => m === base + k);
+    const tag = (i: number): number => (i >= base ? planeMap[i - base] : i);
+    const region = (c: Cell<D> | null): Cell<D> | null => (c && !identity ? g.retagCell(c, tag) : c);
+    const nodeBase = nodes.length, leafBase = leaves.length;
+    const ref = (r: ChildRef): ChildRef => (isLeafRef(r) ? leafRef(refToLeaf(r) + leafBase) : r + nodeBase);
+    for (const n of t.nodes) nodes.push({ plane: tag(n.plane), front: ref(n.front), back: ref(n.back), region: region(n.region) });
+    for (const l of t.leaves) leaves.push(identity ? l : { ...l, region: region(l.region) });
+    splitCount += t.splitCount;
+    refineSplitCount += t.refineSplitCount;
+    return ref(t.root);
+  };
+
+  const walk = (s: Skeleton<D>): ChildRef => {
+    if (s.kind === "subtree") return splice(s.tree);
+    splitCount += s.splits;
+    const nodeIndex = nodes.length;
+    nodes.push(null as unknown as BspNode<D>);
+    const front = walk(s.front);
+    const back = walk(s.back);
+    nodes[nodeIndex] = { plane: s.plane, front, back, region: s.region };
+    return nodeIndex;
+  };
+
+  const root = walk(skeleton);
+  const tree: BspTree<D> = { planes, nodes, leaves, root, bounds: ctx.bounds };
   const emptyLeafCount = leaves.filter((l) => l.contents === "empty").length;
   return {
     tree,
@@ -120,7 +235,7 @@ export function buildBsp<D extends Dim>(g: Geometry<D>, walls: readonly Wall<D>[
       leafCount: leaves.length,
       emptyLeafCount,
       solidLeafCount: leaves.length - emptyLeafCount,
-      maxDepth,
+      maxDepth: leaves.reduce((m, l) => Math.max(m, l.depth), 0),
       splitCount,
       refineSplitCount,
     },
@@ -135,10 +250,29 @@ function internPlane<D extends Dim>(g: Geometry<D>, planes: Plane<D>[], plane: P
   return planes.length - 1;
 }
 
+/** Distinct planes among the fragments, in first-appearance order (the splitter candidates). */
+export function splitCandidates<D extends Dim>(frags: readonly Fragment<D>[]): number[] {
+  return [...new Set(frags.map((f) => f.plane))];
+}
+
+/** Best candidate of a {@link scoreSplitters} call; lower `score` is better. */
+export interface SplitChoice {
+  readonly plane: number;
+  readonly score: number;
+}
+
 /** Scores every distinct plane among the fragments and returns the cheapest. */
 function chooseSplitter<D extends Dim>(g: Geometry<D>, frags: readonly Fragment<D>[], planes: readonly Plane<D>[], opts: BspBuildOptions): number {
-  const candidates = [...new Set(frags.map((f) => f.plane))];
-  if (candidates.length === 1) return candidates[0];
+  const candidates = splitCandidates(frags);
+  return candidates.length === 1 ? candidates[0] : scoreSplitters(g, frags, candidates, planes, opts).plane;
+}
+
+/**
+ * Scores `candidates` (plane indices, non-empty) against `frags` and returns
+ * the first one with the lowest score. Scoring candidate chunks separately and
+ * keeping the lowest score (ties: earliest chunk) gives the same choice.
+ */
+export function scoreSplitters<D extends Dim>(g: Geometry<D>, frags: readonly Fragment<D>[], candidates: readonly number[], planes: readonly Plane<D>[], opts: BspBuildOptions): SplitChoice {
   let best = candidates[0];
   let bestScore = Infinity;
   for (const planeIndex of candidates) {
@@ -161,11 +295,11 @@ function chooseSplitter<D extends Dim>(g: Geometry<D>, frags: readonly Fragment<
       best = planeIndex;
     }
   }
-  return best;
+  return { plane: best, score: bestScore };
 }
 
 /** Distributes fragments to the front/back of a plane, consuming same-facing coplanar ones. */
-function partition<D extends Dim>(g: Geometry<D>, frags: readonly Fragment<D>[], planeIndex: number, planes: readonly Plane<D>[]): Partition<D> {
+export function partition<D extends Dim>(g: Geometry<D>, frags: readonly Fragment<D>[], planeIndex: number, planes: readonly Plane<D>[]): Partition<D> {
   const plane = planes[planeIndex];
   const front: Fragment<D>[] = [];
   const back: Fragment<D>[] = [];

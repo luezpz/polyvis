@@ -11,6 +11,7 @@ import {
   ZERO, aabbFromPoints, aabbOverlaps, classifySegment, clipPolygon, clipSegmentFront, dot, expandAabb, flipLine,
   polygonFromAabb, sameOrientedLine, signedDistance,
 } from "./math";
+import { packPolygon, packSegment, unpackPolygon, unpackSegment } from "./pack";
 import { clipToSeparators } from "./vis/antipenumbra";
 
 export type Dim2 = Dim<Vec2, Segment, ConvexPolygon>;
@@ -20,6 +21,7 @@ export const geometry2: Geometry<Dim2> = {
   zero: ZERO,
   dot,
   coords: (v) => [v.x, v.y],
+  vecAt: (data, at) => ({ x: data[at], y: data[at + 1] }),
   signedDistance,
   flipPlane: flipLine,
   sameOrientedPlane: sameOrientedLine,
@@ -34,6 +36,11 @@ export const geometry2: Geometry<Dim2> = {
   clipCell: clipPolygon,
   cellVertices: (cell) => cell.vertices,
   cellHasTag: (cell, tag) => cell.tags.includes(tag),
+  retagCell: (cell, map) => ({ vertices: cell.vertices, tags: cell.tags.map(map) }),
+  packFacet: packSegment,
+  unpackFacet: unpackSegment,
+  packCell: packPolygon,
+  unpackCell: unpackPolygon,
   wallTouchesCell: wallTouchesRegion,
   clipToSeparators,
 };

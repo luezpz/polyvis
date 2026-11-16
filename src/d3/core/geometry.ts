@@ -11,6 +11,7 @@ import {
   ZERO, aabbFromPoints, aabbOverlaps, classifyWinding, clipPolyhedron, clipWinding, dot, expandAabb, flipPlane,
   polyhedronFromAabb, polyhedronVertices, sameOrientedPlane, signedDistance,
 } from "./math";
+import { packPolyhedron, packWinding, unpackPolyhedron, unpackWinding } from "./pack";
 import { clipToSeparators } from "./vis/antipenumbra";
 
 export type Dim3 = Dim<Vec3, Winding, ConvexPolyhedron>;
@@ -20,6 +21,7 @@ export const geometry3: Geometry<Dim3> = {
   zero: ZERO,
   dot,
   coords: (v) => [v.x, v.y, v.z],
+  vecAt: (data, at) => ({ x: data[at], y: data[at + 1], z: data[at + 2] }),
   signedDistance,
   flipPlane,
   sameOrientedPlane,
@@ -34,6 +36,11 @@ export const geometry3: Geometry<Dim3> = {
   clipCell: clipPolyhedron,
   cellVertices: polyhedronVertices,
   cellHasTag: (cell, tag) => cell.faces.some((f) => f.tag === tag),
+  retagCell: (cell, map) => ({ faces: cell.faces.map((f) => ({ ...f, tag: map(f.tag) })) }),
+  packFacet: packWinding,
+  unpackFacet: unpackWinding,
+  packCell: packPolyhedron,
+  unpackCell: unpackPolyhedron,
   wallTouchesCell: wallTouchesRegion,
   clipToSeparators,
 };

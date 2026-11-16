@@ -65,6 +65,8 @@ export interface Geometry<D extends Dim> {
   dot(a: Vec<D>, b: Vec<D>): number;
   /** Components of `v`, one per axis (`[x, y]` or `[x, y, z]`). */
   coords(v: Vec<D>): number[];
+  /** The vector whose components are `data[at .. at + dimension)` (inverse of `coords`). */
+  vecAt(data: ArrayLike<number>, at: number): Vec<D>;
 
   /** Signed distance of `p` from `plane`: positive in front. */
   signedDistance(plane: Plane<D>, p: Vec<D>): number;
@@ -104,6 +106,18 @@ export interface Geometry<D extends Dim> {
   cellVertices(cell: Cell<D>): readonly Vec<D>[];
   /** True if any boundary piece of `cell` carries `tag`. */
   cellHasTag(cell: Cell<D>, tag: number): boolean;
+  /**
+   * Flat numeric encodings, so facets and cells cross worker boundaries as a
+   * `Float64Array` (a memcpy) instead of a costly object-graph clone. `pack*`
+   * appends to `out`; `unpack*` reads at `data[at]` and returns the value and
+   * the index just past it.
+   */
+  packFacet(facet: Facet<D>, out: number[]): void;
+  unpackFacet(data: ArrayLike<number>, at: number): [Facet<D>, number];
+  packCell(cell: Cell<D>, out: number[]): void;
+  unpackCell(data: ArrayLike<number>, at: number): [Cell<D>, number];
+  /** The same cell with every boundary tag `t` replaced by `map(t)` (parallel BSP merge renumbers planes). */
+  retagCell(cell: Cell<D>, map: (tag: number) => number): Cell<D>;
 
   /**
    * True if wall facet `wall` touches the closure of empty-leaf region `cell`

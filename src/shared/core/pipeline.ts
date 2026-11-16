@@ -7,7 +7,7 @@
  * stages that are geometry-specific (level → walls, portal discovery).
  */
 
-import { type BspBuildOptions, type BspStats, type BspTree, type LeafSurface, buildBsp, buildLeafSurfaces } from "./bsp";
+import { type BspBuildOptions, type BspBuildResult, type BspStats, type BspTree, type LeafSurface, buildBsp, buildLeafSurfaces } from "./bsp";
 import type { Dim, Geometry } from "./geometry";
 import { type LeakReport, type PortalGraph, detectLeaks } from "./portals";
 import { type BitSet, type PortalFlowOptions, type PortalFlowResult, type PortalFlowStats, type PvsSymmetry, type PvsTable, buildPvsTable, computeBaseVis, computeLeafPvs, computePortalFlow } from "./vis";
@@ -78,9 +78,12 @@ export interface Compiler<D extends Dim, L> {
    * point for non-CSG input, which may leak. `timings` receives the stages.
    */
   compileWalls(walls: readonly Wall<D>[], options?: Partial<CompileOptions>, timings?: StageTiming[]): CompileResult<D>;
-  /** Like `compileLevel`, but the portal flow is delegated to `runFlow` (e.g. a worker pool). */
-  compileLevelAsync(level: L, options: Partial<CompileOptions>, runFlow: FlowRunner<D>): Promise<CompileResult<D>>;
+  /** Like `compileLevel`, but the portal flow is delegated to `runFlow` and, if given, the BSP build to `runBsp` (e.g. a worker pool). */
+  compileLevelAsync(level: L, options: Partial<CompileOptions>, runFlow: FlowRunner<D>, runBsp?: BspRunner<D>): Promise<CompileResult<D>>;
 }
+
+/** Runs the BSP stage with complete options; must return what `buildBsp` would. */
+export type BspRunner<D extends Dim> = (walls: readonly Wall<D>[], options: BspBuildOptions) => Promise<BspBuildResult<D>>;
 
 /** Runs the portal flow stage; must honour the options like `computePortalFlow`. */
 export type FlowRunner<D extends Dim> = (graph: PortalGraph<D>, mightSee: readonly BitSet[], options: Partial<PortalFlowOptions>) => Promise<PortalFlowResult>;
@@ -89,9 +92,9 @@ export type FlowRunner<D extends Dim> = (graph: PortalGraph<D>, mightSee: readon
 export function createCompiler<D extends Dim, L>(config: CompilerConfig<D, L>): Compiler<D, L> {
   const g = config.geometry;
 
-  /** Stages up to base vis. */
-  const beforeFlow = (walls: readonly Wall<D>[], opts: CompileOptions, timings: StageTiming[]) => {
-    const { tree, stats: bspStats } = timed(timings, "bsp", () => buildBsp(g, walls, { ...config.bspDefaults, ...opts.bsp }));
+  /** Stages up to base vis; `bsp` is the BSP stage's result (built by the caller, timed in `timings`). */
+  const beforeFlow = (walls: readonly Wall<D>[], bsp: BspBuildResult<D>, timings: StageTiming[]) => {
+    const { tree, stats: bspStats } = bsp;
     const surfaces = timed(timings, "surfaces", () => buildLeafSurfaces(g, tree, walls));
     const graph = timed(timings, "portals", () => config.buildPortalGraph(tree));
     const leaks = timed(timings, "leaks", () => detectLeaks(g, tree, graph));
@@ -110,7 +113,8 @@ export function createCompiler<D extends Dim, L>(config: CompilerConfig<D, L>): 
 
   const compileWalls = (walls: readonly Wall<D>[], options: Partial<CompileOptions> = {}, timings: StageTiming[] = []): CompileResult<D> => {
     const opts: CompileOptions = { ...DEFAULT_COMPILE_OPTIONS, ...options };
-    const pre = beforeFlow(walls, opts, timings);
+    const bsp = timed(timings, "bsp", () => buildBsp(g, walls, bspOptions(opts)));
+    const pre = beforeFlow(walls, bsp, timings);
     const flow = timed(timings, "portal flow", () => computePortalFlow(g, pre.graph, pre.mightSee, opts.flow));
     return afterFlow(pre, flow, opts, timings);
   };
@@ -121,11 +125,16 @@ export function createCompiler<D extends Dim, L>(config: CompilerConfig<D, L>): 
     return compileWalls(walls, options, timings);
   };
 
-  const compileLevelAsync = async (level: L, options: Partial<CompileOptions>, runFlow: FlowRunner<D>): Promise<CompileResult<D>> => {
+  const bspOptions = (opts: CompileOptions): BspBuildOptions => ({ ...config.bspDefaults, ...opts.bsp });
+
+  const compileLevelAsync = async (level: L, options: Partial<CompileOptions>, runFlow: FlowRunner<D>, runBsp?: BspRunner<D>): Promise<CompileResult<D>> => {
     const opts: CompileOptions = { ...DEFAULT_COMPILE_OPTIONS, ...options };
     const timings: StageTiming[] = [];
     const walls = timed(timings, "csg", () => config.levelWalls(level));
-    const pre = beforeFlow(walls, opts, timings);
+    const tb = performance.now();
+    const bsp = runBsp ? await runBsp(walls, bspOptions(opts)) : buildBsp(g, walls, bspOptions(opts));
+    timings.push({ stage: "bsp", ms: performance.now() - tb });
+    const pre = beforeFlow(walls, bsp, timings);
     const t0 = performance.now();
     const flow = await runFlow(pre.graph, pre.mightSee, opts.flow);
     timings.push({ stage: "portal flow", ms: performance.now() - t0 });

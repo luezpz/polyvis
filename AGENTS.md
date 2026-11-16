@@ -31,7 +31,8 @@ src/shared/core/      dimension-agnostic compiler, generic over D extends Dim
   geometry.ts         THE SEAM: Geometry<D> interface every stage is written against
   math/               tolerances, Side
   wall.ts             Wall<D> (BSP input)
-  bsp/                build, refine (corner/size splits), query, leaf surfaces, types
+  bsp/                build (subtree tasks + assembly), parallel build, pack (flat worker
+                      messages), refine (corner/size splits), query, leaf surfaces, types
   portals/            Portal<D>/PortalGraph<D> types, components, leak detection
   vis/                BitSet, base vis, portal flow (+ exact parallel dependency scheduler), leaf PVS, shared PVS rows
   pipeline.ts         createCompiler(config) → { compileLevel, compileWalls }
@@ -45,7 +46,8 @@ src/d3/core/          3D kernel: Vec3, Plane3, Winding, ConvexPolyhedron, brushe
 src/shared/app/        browser code shared by both editors (never imported by core)
   editor/             history, BaseViewState (layers, probe, snapping)
   compile/            CompileClient<D, L>, worker protocol + hydrateResult, serveCompiler,
-                      flow worker pool (flowPool, serveFlow, flowProtocol)
+                      nested worker pool shared by BSP + flow (workerPool, servePool,
+                      bspPool/bspProtocol, flowPool/flowProtocol)
   ui/                 dom helpers, panel widgets, compile panel sections, base styles.css
   render/palette.ts   brush-kind colours, leaf hue
 src/d2/app, src/d3/app   editors (separate on purpose; see NOTES.md)

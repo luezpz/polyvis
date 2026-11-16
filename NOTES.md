@@ -25,6 +25,18 @@ only decisions, gotchas and open items. The 2D/3D merge (former PLAN.md / PROGRE
   The editors' compile worker spawns nested flow workers (`shared/app/compile/flowPool.ts`,
   cores - 1, max 16); graphs under 200 portals, or no nested-worker support, use one thread.
   Sample levels allow little concurrency (mean ~2-3 ready sources, in-process measurement).
+- Parallel BSP build (`shared/core/bsp/parallelBuild.ts`) gives the same tree as `buildBsp`
+  (tested with `toEqual`); `buildBsp` itself is now one subtree task + `assembleTree`, which
+  splices subtrees in preorder and renumbers their refinement planes (`Geometry.retagCell`).
+  Root splitter scoring is ~40% of the build, so the main thread walks the top and every worker
+  scores a candidate chunk per big node; small nodes / empty regions become subtree tasks, run
+  only after the top walk (queued ahead of scoring they stalled it). Messages are flat
+  (`bsp/pack.ts`, `Geometry.pack*`): cloning regions as objects cost ~200 ms on 4k walls, more
+  than the build; workers keep big nodes' fragments and re-derive children by partition.
+  Measured with Node threads, 4271 walls (300-room `randomLevel`): 514 -> 335 ms with 4 threads,
+  worse with 8+ (serial setup ~75 ms, top walk); so capped at 4 (`bspPool.ts`), used from 300
+  walls. BSP is only ~1-2% of a big compile; base vis (single-threaded) dominates there.
+  Editors share one nested pool (`shared/app/compile/workerPool.ts`, entry `poolWorker.ts`).
 
 ## Gotchas
 - Git history of the source repos (`polyvis2d` cdac3e9, `polyvis3d` 2de2526) was not carried over.
@@ -32,7 +44,9 @@ only decisions, gotchas and open items. The 2D/3D merge (former PLAN.md / PROGRE
 ## Open TODOs
 - Browser smoke test never done by an agent: `/2d.html` worker compile, select tool
   (click-to-cycle, edge push/pull), surfaces layer; `/3d.html` panel after the shared-UI refactor.
-- Parallel flow never run in a browser by an agent: confirm nested workers start, and measure
-  the speed-up on a big 3D level (console.debug logs ready-source counts); tune `MAX_BATCH` /
-  `MIN_PARALLEL_PORTALS`.
+- Parallel flow and parallel BSP never run in a browser by an agent: confirm nested workers
+  start, and measure the speed-up on a big 3D level (console.debug logs ready-source counts);
+  tune `MAX_BATCH` / `MIN_PARALLEL_PORTALS` / `MIN_PARALLEL_WALLS` / `MAX_BSP_THREADS`.
+- Base vis (`computeBaseVis`) is the biggest stage on large levels (118 s vs 2.7 s BSP at 300
+  rooms) and is still single-threaded: the next parallelization target.
 - Open decision: merge the two editor shells (panel/app) further, or keep sharing helpers only.

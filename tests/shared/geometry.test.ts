@@ -41,6 +41,33 @@ describe.each(kernels)("%s geometry kernel", (_, g) => {
     expect(g.clipCell(cell, g.axisPlane(0, 2), 9)).toBeNull();
   });
 
+  it("retagCell maps every boundary tag and keeps the shape", () => {
+    const { box, plane } = fixtures(g);
+    const front = g.clipCell(g.cellFromBounds(box, -2), plane, 7)!;
+    const moved = g.retagCell(front, (t) => (t === 7 ? 12 : t));
+    expect(g.cellHasTag(moved, 12)).toBe(true);
+    expect(g.cellHasTag(moved, 7)).toBe(false);
+    expect(g.cellHasTag(moved, -2)).toBe(true);
+    expect(g.cellVertices(moved)).toEqual(g.cellVertices(front));
+  });
+
+  it("pack/unpack round-trips facets, cells and vectors back to back", () => {
+    const { box, plane } = fixtures(g);
+    const cell = g.clipCell(g.cellFromBounds(box, -2), plane, 7)!;
+    const facet = spanning(g);
+    const out: number[] = [];
+    g.packFacet(facet, out);
+    g.packCell(cell, out);
+    out.push(...g.coords(plane.n));
+    const data = Float64Array.from(out);
+    const [f, at1] = g.unpackFacet(data, 0);
+    const [c, at2] = g.unpackCell(data, at1);
+    expect(f).toEqual(facet);
+    expect(c).toEqual(cell);
+    expect(g.vecAt(data, at2)).toEqual(plane.n);
+    expect(at2 + g.dimension).toBe(data.length);
+  });
+
   it("clipFacet keeps the front part, returns unchanged facets as-is, and drops facets on the plane", () => {
     const { plane } = fixtures(g);
     const f = spanning(g);
