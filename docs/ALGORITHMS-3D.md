@@ -65,7 +65,10 @@ Unchanged from 2D apart from the primitives:
   of the cell, tested by clipping it to the cell's faces pushed outwards) and whose plane cuts
   through the cell is a candidate; the most balanced wins. In 3D this captures vertical door
   jambs, lintels, balcony lips and the tops of low blocks, i.e. the reflex edges of the empty
-  space where the view changes.
+  space where the view changes. Candidates are inherited: a wall touching the empty leaf the
+  solid-leaf build produced stays a candidate for every cell refinement cuts from it, so split
+  order does not matter (e.g. in "Two rooms" the doorway's side-wall split no longer stops the
+  corridor ceiling plane from splitting the cell beside the door).
 - `maxCellSize`: cells larger than this along x, y or z are halved by an axis-aligned plane.
 - `minCellSize`: refinement splits leaving a side thinner than this are rejected. The 3D
   default is 1 (2D: 0.5), since cells, portals and flow time grow much faster in 3D.

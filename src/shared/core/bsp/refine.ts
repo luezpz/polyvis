@@ -21,6 +21,12 @@
  *    `qbsp` gets a similar effect for free from splitting by every brush face.
  *    (2D: "touches" means a wall endpoint lies in the leaf; 3D: the wall
  *    polygon comes within tolerance of it. See `Geometry.wallTouchesCell`.)
+ *    "The leaf" is the empty leaf as the solid-leaf build left it: the walls
+ *    touching it ({@link cornerCandidates}) stay candidates for every
+ *    cell refinement cuts from it (plus each cell's own touching walls). Re-testing per cell
+ *    would depend on split order: after a room is cut along one corner's
+ *    plane, the cell on the far side may meet another corner wall only at a
+ *    point (or not at all) and would keep wrapping around that corner.
  * 2. **Cell size limits.** Empty leaves larger than `maxCellSize` along any
  *    axis are halved by an axis-aligned plane (like `qbsp`'s block grid), and
  *    no refinement split may create a cell thinner than `minCellSize` along
@@ -65,8 +71,20 @@ export function refinementEnabled(opts: RefineOptions): boolean {
 }
 
 /**
- * Picks the next refinement splitter for an empty leaf region, or null if the
- * leaf should stay as it is.
+ * Corner-split candidates for an empty leaf region fresh from the solid-leaf
+ * build: the walls touching its closure. Empty if corner splits are disabled.
+ */
+export function cornerCandidates<D extends Dim>(g: Geometry<D>, region: Cell<D>, walls: readonly RefineWall<D>[], opts: RefineOptions): RefineWall<D>[] {
+  if (!opts.cornerSplits) return [];
+  const box = g.boundsOf(g.cellVertices(region));
+  if (!box) return [];
+  return walls.filter((w) => g.boundsOverlap(box, w.box, PROBE_OFFSET) && g.wallTouchesCell(w.winding, region));
+}
+
+/**
+ * Picks the next refinement splitter for an empty region, or null if it
+ * should stay a leaf. `candidates`: {@link cornerCandidates} of this region
+ * and of every region it was cut from since the solid-leaf build.
  *
  * Corner splits come first; among them the most balanced one wins (largest
  * thinner side), which keeps cells compact. Only when no corner split applies
@@ -74,7 +92,7 @@ export function refinementEnabled(opts: RefineOptions): boolean {
  * an ancestor region cannot span a descendant, so each wall plane is used at
  * most once per path; size splits halve the region's extent.
  */
-export function chooseRefineSplit<D extends Dim>(g: Geometry<D>, region: Cell<D>, walls: readonly RefineWall<D>[], opts: RefineOptions): Plane<D> | null {
+export function chooseRefineSplit<D extends Dim>(g: Geometry<D>, region: Cell<D>, candidates: readonly RefineWall<D>[], opts: RefineOptions): Plane<D> | null {
   const vertices = g.cellVertices(region);
   const box = g.boundsOf(vertices);
   if (!box) return null;
@@ -84,12 +102,10 @@ export function chooseRefineSplit<D extends Dim>(g: Geometry<D>, region: Cell<D>
   if (opts.cornerSplits) {
     let best: Plane<D> | null = null;
     let bestThickness = 0;
-    for (const w of walls) {
-      if (!g.boundsOverlap(box, w.box, PROBE_OFFSET)) continue;
-      // Cheap test first: the wall plane must cut the region into two sufficiently thick parts.
+    for (const w of candidates) {
+      // The wall plane must cut the region into two sufficiently thick parts.
       const t = splitThickness(g, vertices, w.plane);
       if (t <= bestThickness || t < minThickness) continue;
-      if (!g.wallTouchesCell(w.winding, region)) continue;
       best = w.plane;
       bestThickness = t;
     }

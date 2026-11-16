@@ -52,7 +52,8 @@ leaf straight away, the builder keeps splitting it:
 - `cornerSplits` — any wall whose endpoint touches the region and whose line passes through its
   interior (i.e. the wall's extension past the corner) is a candidate; the most balanced one
   wins. These lines are where the view around a corner changes, so cells bounded by them get
-  much tighter PVS rows.
+  much tighter PVS rows. Candidates are inherited: a wall touching the empty leaf the
+  solid-leaf build produced stays a candidate for every cell refinement cuts from it.
 - `maxCellSize` — regions wider/taller than this are halved by an axis-aligned line
   (`0` = off), like qbsp's block grid.
 - `minCellSize` — refinement splits that would leave a side thinner than this along the split

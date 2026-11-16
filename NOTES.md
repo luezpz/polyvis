@@ -10,6 +10,13 @@ only decisions, gotchas and open items. The 2D/3D merge (former PLAN.md / PROGRE
   different primitives; sharing would need new `Geometry` ops for little gain.
 - Intentional parity gaps: probe-from-camera and work plane / brush height are 3D-only;
   vertex drag is 2D-only (3D brushes are planes).
+- Corner-split candidates are inherited down the refinement recursion (`bsp/build.ts`
+  `buildEmpty`), unioned with each cell's own touching walls. Per-cell touch tests alone made
+  results depend on split order (3D "Two rooms": cells beside the door missed the corridor
+  ceiling plane). The union is needed because point/edge contacts sit at the 3D touch tolerance
+  and can appear only on a smaller child. Rejected alternative: accepting walls whose extension
+  reaches the cell unobstructed (branch `proto/corner-split-extension`): about 2x the cells.
+- 3D "Pillared hall" compile went from about 140 ms to 520 ms with inheritance (75 -> 129 empty leaves).
 
 ## Gotchas
 - Git history of the source repos (`polyvis2d` cdac3e9, `polyvis3d` 2de2526) was not carried over.
