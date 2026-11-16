@@ -268,7 +268,7 @@ Child refs: `>= 0` is a node index, `< 0` is a leaf stored as `~leafIndex`.
 
 ## 6. Empty-leaf refinement
 
-File: `src/shared/core/bsp/refine.ts`
+Files: `src/shared/core/bsp/refine.ts` (shared loop), `src/d3/core/bsp/refine.ts` (3D touch test)
 
 ```text
  1  for each empty leaf L (worklist):
@@ -286,7 +286,7 @@ File: `src/shared/core/bsp/refine.ts`
 | Line | Explanation |
 |---|---|
 | 1 | Plain BSP leaves can be huge and see "around corners". Splitting them makes the PVS tighter. |
-| 2–4 | A wall touching the cell whose plane slices through it marks a **reflex edge**: a door jamb, lintel, balcony lip or block top, where what you can see changes. The touch test clips the wall against the cell's faces pushed slightly outward. |
+| 2–4 | A wall touching the cell whose plane slices through it marks a **reflex edge**: a door jamb, lintel, balcony lip or block top, where what you can see changes. The touch test clips the wall's vertices against the cell's faces pushed slightly outward; anything left, even a single point or an edge, counts. That matters at doorways: the cell beside the opening often meets the lintel or jamb only at a corner (`clipWinding` would drop that zero-area remnant). Candidates are tested per cell and never inherited from parent cells, so a wall only splits cells next to it. |
 | 5 | Of several candidates, take the one splitting the cell most evenly. |
 | 6–7 | Optional `maxCellSize`: very large open cells are halved along an axis. |
 | 8 | `minCellSize` (3D default 1, 2D 0.5) stops slivers. Cell count, portal count and flow time grow fast in 3D. |

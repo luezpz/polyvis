@@ -62,11 +62,12 @@ Unchanged from 2D apart from the primitives:
 **Empty-leaf refinement** (`shared/core/bsp/refine.ts`), in 3D:
 
 - `cornerSplits`: any wall that **touches the cell** (its polygon comes within `PROBE_OFFSET`
-  of the cell, tested by clipping it to the cell's faces pushed outwards; a single point or
-  edge of contact counts) and whose plane cuts
-  through the cell is a candidate; the most balanced wins. In 3D this captures vertical door
-  jambs, lintels, balcony lips and the tops of low blocks, i.e. the reflex edges of the empty
-  space where the view changes.
+  of the cell, tested by clipping its vertices to the cell's faces pushed outwards; a single
+  point or edge of contact counts) and whose plane cuts through the cell is a candidate; the
+  most balanced wins. In 3D this captures vertical door jambs, lintels, balcony lips and the
+  tops of low blocks, i.e. the reflex edges of the empty space where the view changes. The
+  test is per cell, so splits stay local: a cell beside a doorway that meets the lintel only
+  at a corner is still split by it, but walls elsewhere in the original leaf are not.
 - `maxCellSize`: cells larger than this along x, y or z are halved by an axis-aligned plane.
 - `minCellSize`: refinement splits leaving a side thinner than this are rejected. The 3D
   default is 1 (2D: 0.5), since cells, portals and flow time grow much faster in 3D.
@@ -146,7 +147,7 @@ box, and leaks are reported, not fatal.
 | `ConvexPolygon` with edge tags | `ConvexPolyhedron`: faces with outward planes and tags |
 | Brush = convex vertex loop | Brush = set of outward planes, faces derived |
 | CSG: fragment edges at intersections | CSG: ClipOutside face fragmentation + coplanar subtraction |
-| Corner splits: walls whose endpoint touches the cell | walls whose polygon touches the cell |
+| Corner splits: walls whose endpoint touches the cell | walls whose polygon touches the cell (point/edge contact counts) |
 | Portals: interval overlap on a line | convex polygon intersection on a plane |
 | Separators: endpoint × endpoint | edge × vertex, both directions |
 | Leak: touches the bounding rectangle | touches the bounding box (6 faces) |
