@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildWalls, buildBsp, buildLeafSurfaces, locateLeaf, makeEmptySpaceTest, makeBoxBrush, makeBrush, makePrismBrush, moveBrushFace,
   translateBrush, brushVolume, serializeLevel, parseLevel, newellNormal, windingArea, polyhedronVolume, polyhedronAabb, aabbVolume,
-  clipWinding, flipPlane, offsetPlane, polyhedronVertices, SAMPLE_LEVELS, PROBE_OFFSET, type Wall, type Winding, type ConvexPolyhedron,
+  polyhedronVertices, polyhedronFromAabb, wallTouchesRegion, compileLevel, SAMPLE_LEVELS, PROBE_OFFSET, type Wall, type Winding, type ConvexPolyhedron,
 } from "../../src/d3/core";
 import { boxLevel, randomLevel, rng } from "./helpers";
 
@@ -160,16 +160,45 @@ function thickness(region: ConvexPolyhedron, w: Wall): number {
   return Math.min(f, b);
 }
 
-function touches(region: ConvexPolyhedron, w: Winding): boolean {
-  let cur: Winding | null = w;
-  for (const f of region.faces) {
-    cur = clipWinding(cur, flipPlane(offsetPlane(f.plane, PROBE_OFFSET)));
-    if (!cur) return false;
-  }
-  return true;
+const touches = (region: ConvexPolyhedron, w: Winding): boolean => wallTouchesRegion(w, region);
+
+/** Bounding boxes `[min, max]` of the empty leaves of a compiled sample level, rounded to 1e-6. */
+function emptyLeafBoxes(name: string): [number[], number[]][] {
+  const { tree } = compileLevel(SAMPLE_LEVELS.find((s) => s.name === name)!.create());
+  const r = (v: number) => Math.round(v * 1e6) / 1e6;
+  return tree.leaves.filter((l) => l.contents === "empty" && l.region).map((l) => {
+    const b = polyhedronAabb(l.region!)!;
+    return [[r(b.min.x), r(b.min.y), r(b.min.z)], [r(b.max.x), r(b.max.y), r(b.max.z)]];
+  });
 }
 
 describe("BSP refinement", () => {
+  it("a wall touching a cell only at a point or along an edge still touches it", () => {
+    const cell = polyhedronFromAabb({ min: { x: 0, y: 0, z: 0 }, max: { x: 8, y: 3, z: 4 } });
+    // Corridor ceiling beyond the cell's corner edge: meets the cell only at (8, 3, 2.5).
+    const point: Winding = [{ x: 8, y: 3, z: 2.5 }, { x: 10, y: 3, z: 2.5 }, { x: 10, y: 5, z: 2.5 }, { x: 8, y: 5, z: 2.5 }];
+    // Jamb wall in the plane y = 3 beyond x = 8: meets the cell along the edge x = 8, y = 3.
+    const edge: Winding = [{ x: 8, y: 3, z: 0 }, { x: 10, y: 3, z: 0 }, { x: 10, y: 3, z: 2.5 }, { x: 8, y: 3, z: 2.5 }];
+    const apart: Winding = point.map((p) => ({ ...p, x: p.x + 0.01 }));
+    expect(wallTouchesRegion(point, cell)).toBe(true);
+    expect(wallTouchesRegion(edge, cell)).toBe(true);
+    expect(wallTouchesRegion(apart, cell)).toBe(false);
+  });
+
+  it("Two rooms: the cells beside the doorway are split by the corridor ceiling plane", () => {
+    const boxes = emptyLeafBoxes("Two rooms");
+    // Room cells on the y < 3 side of the door, both rooms: none may span z = 2.5.
+    const beside = boxes.filter(([mn, mx]) => mx[1] <= 3 && (mx[0] <= 8 || mn[0] >= 10));
+    expect(beside.length).toBeGreaterThan(0);
+    for (const [mn, mx] of beside) expect(mn[2] >= 2.5 || mx[2] <= 2.5).toBe(true);
+  });
+
+  it("Two storeys: the corridor walls beyond the shaft do not split the upper room", () => {
+    const upperRoom = emptyLeafBoxes("Two storeys").filter(([mn, mx]) => mn[2] >= 4 && mx[0] <= 8);
+    expect(upperRoom.length).toBeGreaterThan(0);
+    for (const [mn, mx] of upperRoom) for (const y of [4, 6]) expect([mn[1], mx[1]]).not.toContain(y);
+  });
+
   it("corner splits: no wall touching an empty leaf extends through it", () => {
     for (const level of levels()) {
       const walls = buildWalls(level.brushes);
