@@ -7,3 +7,4 @@ antipenumbra (separator construction) remain per dimension.
 
 - [ALGORITHMS-2D.md](ALGORITHMS-2D.md): every stage explained in 2D (the simplest setting).
 - [ALGORITHMS-3D.md](ALGORITHMS-3D.md): what changes in 3D, plus brushes as planes and OBJ import.
+- [PIPELINE-3D.md](PIPELINE-3D.md): the whole 3D pipeline as pseudocode, explained line by line.
