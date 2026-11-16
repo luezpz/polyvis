@@ -33,7 +33,7 @@ src/shared/core/      dimension-agnostic compiler, generic over D extends Dim
   wall.ts             Wall<D> (BSP input)
   bsp/                build, refine (corner/size splits), query, leaf surfaces, types
   portals/            Portal<D>/PortalGraph<D> types, components, leak detection
-  vis/                BitSet, base vis, portal flow, leaf PVS, shared PVS rows
+  vis/                BitSet, base vis, portal flow (+ exact parallel dependency scheduler), leaf PVS, shared PVS rows
   pipeline.ts         createCompiler(config) → { compileLevel, compileWalls }
   export/pvsRows.ts   decodePvsRow
 src/d2/core/          2D kernel: Vec2, Line2, Segment, ConvexPolygon; CSG; portal discovery;
@@ -44,7 +44,8 @@ src/d3/core/          3D kernel: Vec3, Plane3, Winding, ConvexPolyhedron, brushe
                       geometry.ts (geometry3); pipeline binding; export
 src/shared/app/        browser code shared by both editors (never imported by core)
   editor/             history, BaseViewState (layers, probe, snapping)
-  compile/            CompileClient<D, L>, worker protocol + hydrateResult, serveCompiler
+  compile/            CompileClient<D, L>, worker protocol + hydrateResult, serveCompiler,
+                      flow worker pool (flowPool, serveFlow, flowProtocol)
   ui/                 dom helpers, panel widgets, compile panel sections, base styles.css
   render/palette.ts   brush-kind colours, leaf hue
 src/d2/app, src/d3/app   editors (separate on purpose; see NOTES.md)

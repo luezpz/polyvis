@@ -31,3 +31,7 @@ export const compileLevel = (level: Level, options: Partial<shared.CompileOption
  */
 export const compileWalls = (walls: readonly Wall[], options: Partial<shared.CompileOptions> = {}, timings: shared.StageTiming[] = []): CompileResult =>
   compiler.compileWalls(walls, options, timings);
+
+/** Like `compileLevel`, but the portal flow runs through `runFlow` (the editor's worker pool). */
+export const compileLevelAsync = (level: Level, options: Partial<shared.CompileOptions>, runFlow: shared.FlowRunner<Dim2>): Promise<CompileResult> =>
+  compiler.compileLevelAsync(level, options, runFlow);

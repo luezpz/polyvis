@@ -16,6 +16,15 @@ only decisions, gotchas and open items. The 2D/3D merge (former PLAN.md / PROGRE
   jamb only that way. Rejected: inheriting candidates down the refinement recursion (planes
   from far walls cut whole rooms: "Two storeys" upper room); accepting walls whose extension
   reaches the cell (branch `proto/corner-split-extension`, about 2x the cells).
+- Parallel portal flow (`shared/core/vis/parallelFlow.ts`) is exact: source i depends only on
+  deps(i) = { j in mightSee[i] : rank(j) < rank(i) } (it reads finished rows only for portals in
+  its `might` set), so it starts when those finish; `flowFromSource`'s `rank` arg makes workers
+  ignore rows of later sources. Same `portalVis` as single-threaded unless `maxSteps` truncates
+  (budget checked at dispatch). Rejected: fixed waves (branch `parallel-portal-flow`, slightly
+  looser results); splitting one source's DFS (few uneven branches, a round trip per source).
+  The editors' compile worker spawns nested flow workers (`shared/app/compile/flowPool.ts`,
+  cores - 1, max 16); graphs under 200 portals, or no nested-worker support, use one thread.
+  Sample levels allow little concurrency (mean ~2-3 ready sources, in-process measurement).
 
 ## Gotchas
 - Git history of the source repos (`polyvis2d` cdac3e9, `polyvis3d` 2de2526) was not carried over.
@@ -23,4 +32,7 @@ only decisions, gotchas and open items. The 2D/3D merge (former PLAN.md / PROGRE
 ## Open TODOs
 - Browser smoke test never done by an agent: `/2d.html` worker compile, select tool
   (click-to-cycle, edge push/pull), surfaces layer; `/3d.html` panel after the shared-UI refactor.
+- Parallel flow never run in a browser by an agent: confirm nested workers start, and measure
+  the speed-up on a big 3D level (console.debug logs ready-source counts); tune `MAX_BATCH` /
+  `MIN_PARALLEL_PORTALS`.
 - Open decision: merge the two editor shells (panel/app) further, or keep sharing helpers only.

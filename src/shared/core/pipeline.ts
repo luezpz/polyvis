@@ -10,7 +10,7 @@
 import { type BspBuildOptions, type BspStats, type BspTree, type LeafSurface, buildBsp, buildLeafSurfaces } from "./bsp";
 import type { Dim, Geometry } from "./geometry";
 import { type LeakReport, type PortalGraph, detectLeaks } from "./portals";
-import { type BitSet, type PortalFlowOptions, type PortalFlowStats, type PvsSymmetry, type PvsTable, buildPvsTable, computeBaseVis, computeLeafPvs, computePortalFlow } from "./vis";
+import { type BitSet, type PortalFlowOptions, type PortalFlowResult, type PortalFlowStats, type PvsSymmetry, type PvsTable, buildPvsTable, computeBaseVis, computeLeafPvs, computePortalFlow } from "./vis";
 import type { Wall } from "./wall";
 
 export interface CompileOptions {
@@ -78,27 +78,41 @@ export interface Compiler<D extends Dim, L> {
    * point for non-CSG input, which may leak. `timings` receives the stages.
    */
   compileWalls(walls: readonly Wall<D>[], options?: Partial<CompileOptions>, timings?: StageTiming[]): CompileResult<D>;
+  /** Like `compileLevel`, but the portal flow is delegated to `runFlow` (e.g. a worker pool). */
+  compileLevelAsync(level: L, options: Partial<CompileOptions>, runFlow: FlowRunner<D>): Promise<CompileResult<D>>;
 }
+
+/** Runs the portal flow stage; must honour the options like `computePortalFlow`. */
+export type FlowRunner<D extends Dim> = (graph: PortalGraph<D>, mightSee: readonly BitSet[], options: Partial<PortalFlowOptions>) => Promise<PortalFlowResult>;
 
 /** Binds the pipeline to one dimension. */
 export function createCompiler<D extends Dim, L>(config: CompilerConfig<D, L>): Compiler<D, L> {
   const g = config.geometry;
 
-  const compileWalls = (walls: readonly Wall<D>[], options: Partial<CompileOptions> = {}, timings: StageTiming[] = []): CompileResult<D> => {
-    const opts: CompileOptions = { ...DEFAULT_COMPILE_OPTIONS, ...options };
+  /** Stages up to base vis. */
+  const beforeFlow = (walls: readonly Wall<D>[], opts: CompileOptions, timings: StageTiming[]) => {
     const { tree, stats: bspStats } = timed(timings, "bsp", () => buildBsp(g, walls, { ...config.bspDefaults, ...opts.bsp }));
     const surfaces = timed(timings, "surfaces", () => buildLeafSurfaces(g, tree, walls));
     const graph = timed(timings, "portals", () => config.buildPortalGraph(tree));
     const leaks = timed(timings, "leaks", () => detectLeaks(g, tree, graph));
     const mightSee = timed(timings, "base vis", () => computeBaseVis(g, graph));
-    const { portalVis, stats: flowStats } = timed(timings, "portal flow", () => computePortalFlow(g, graph, mightSee, opts.flow));
+    return { walls, tree, bspStats, surfaces, graph, leaks, mightSee };
+  };
+
+  /** Stages after portal flow, assembling the result. */
+  const afterFlow = (pre: ReturnType<typeof beforeFlow>, flow: PortalFlowResult, opts: CompileOptions, timings: StageTiming[]): CompileResult<D> => {
+    const { tree, graph, mightSee } = pre;
+    const { portalVis, stats: flowStats } = flow;
     const pvs = timed(timings, "leaf pvs", () => computeLeafPvs(tree, graph, portalVis, opts.symmetry));
     const pvsTable = timed(timings, "pvs rows", () => buildPvsTable(pvs));
-    return {
-      walls, tree, bspStats, surfaces, graph, leaks, mightSee, portalVis, flowStats, pvs, pvsTable,
-      summary: summarize(tree, graph, mightSee, portalVis, pvs),
-      timings,
-    };
+    return { ...pre, portalVis, flowStats, pvs, pvsTable, summary: summarize(tree, graph, mightSee, portalVis, pvs), timings };
+  };
+
+  const compileWalls = (walls: readonly Wall<D>[], options: Partial<CompileOptions> = {}, timings: StageTiming[] = []): CompileResult<D> => {
+    const opts: CompileOptions = { ...DEFAULT_COMPILE_OPTIONS, ...options };
+    const pre = beforeFlow(walls, opts, timings);
+    const flow = timed(timings, "portal flow", () => computePortalFlow(g, pre.graph, pre.mightSee, opts.flow));
+    return afterFlow(pre, flow, opts, timings);
   };
 
   const compileLevel = (level: L, options: Partial<CompileOptions> = {}): CompileResult<D> => {
@@ -107,7 +121,18 @@ export function createCompiler<D extends Dim, L>(config: CompilerConfig<D, L>): 
     return compileWalls(walls, options, timings);
   };
 
-  return { compileLevel, compileWalls };
+  const compileLevelAsync = async (level: L, options: Partial<CompileOptions>, runFlow: FlowRunner<D>): Promise<CompileResult<D>> => {
+    const opts: CompileOptions = { ...DEFAULT_COMPILE_OPTIONS, ...options };
+    const timings: StageTiming[] = [];
+    const walls = timed(timings, "csg", () => config.levelWalls(level));
+    const pre = beforeFlow(walls, opts, timings);
+    const t0 = performance.now();
+    const flow = await runFlow(pre.graph, pre.mightSee, opts.flow);
+    timings.push({ stage: "portal flow", ms: performance.now() - t0 });
+    return afterFlow(pre, flow, opts, timings);
+  };
+
+  return { compileLevel, compileWalls, compileLevelAsync };
 }
 
 /** Averages of the PVS and portal-vis set sizes, for the stats panel. */

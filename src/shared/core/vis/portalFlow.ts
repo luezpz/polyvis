@@ -63,83 +63,120 @@ export interface PortalFlowResult {
   readonly stats: PortalFlowStats;
 }
 
-export function computePortalFlow<D extends Dim>(geometry: Geometry<D>, graph: PortalGraph<D>, mightSee: readonly BitSet[], options: Partial<PortalFlowOptions> = {}): PortalFlowResult {
-  const opts: PortalFlowOptions = { ...DEFAULT_PORTAL_FLOW_OPTIONS, ...options };
+/** Flow result of one source portal. */
+export interface SourceFlow {
+  readonly sourceId: number;
+  /** Portals visible through the source; its base "might see" set if `truncated`. */
+  readonly vis: BitSet;
+  readonly steps: number;
+  readonly maxChainDepth: number;
+  /** True if the step budget ran out during this source. */
+  readonly truncated: boolean;
+}
+
+/**
+ * Source order: portals that might see the least first, so their final results
+ * prune the searches of more complex portals (Quake's "sorted portals").
+ * Returns portal ids.
+ */
+export function portalFlowOrder(mightSee: readonly BitSet[]): number[] {
+  const counts = mightSee.map((m) => m.count());
+  return [...mightSee.keys()].sort((a, b) => counts[a] - counts[b]);
+}
+
+/**
+ * Runs the flow from one source portal.
+ * `known[i]`: finished vis of portal i if available (tighter pruning), else undefined (uses `mightSee[i]`).
+ * `budget`: maximum generator tests (`Infinity`: unlimited); when exceeded the source falls back to `mightSee`.
+ * `onChain`: scratch, `graph.leafCount` zeros; left zeroed on return.
+ * `rank`: position of each portal in the flow order, or null. When given, `known[j]` is only used if
+ * `rank[j] < rank[sourceId]`, so the result is the single-threaded one even if `known` holds later rows.
+ */
+export function flowFromSource<D extends Dim>(geometry: Geometry<D>, graph: PortalGraph<D>, mightSee: readonly BitSet[], known: readonly (BitSet | undefined)[], sourceId: number, clipSource: boolean, budget: number, onChain: Uint8Array, rank: Int32Array | null = null): SourceFlow {
   // Hot loop: bind the geometry operations once.
   const { clipFacet, flipPlane, clipToSeparators } = geometry;
   const { portals, portalsFrom } = graph;
-  const n = portals.length;
+  const sourcePortal = portals[sourceId];
+  const vis = new BitSet(portals.length);
+  const sourcePlane = sourcePortal.plane;
+  const sourceRank = rank ? rank[sourceId] : 0;
+  let steps = 0;
+  let maxChainDepth = 0;
+  let truncated = false;
+
+  const recurse = (leaf: number, source: Facet<D>, pass: Facet<D> | null, might: BitSet, depth: number): void => {
+    if (depth > maxChainDepth) maxChainDepth = depth;
+    for (const gid of portalsFrom[leaf]) {
+      if (!might.has(gid)) continue;
+      const gen = portals[gid];
+      if (onChain[gen.to]) continue; // a straight line cannot re-enter a convex leaf
+
+      // Prune: if G is already known visible and nothing new could be found beyond it, skip.
+      const row = rank && rank[gid] >= sourceRank ? undefined : known[gid];
+      const newMight = might.and(row ?? mightSee[gid]);
+      if (vis.has(gid) && !newMight.hasAnyNotIn(vis)) continue;
+
+      if (++steps > budget) {
+        truncated = true;
+        return;
+      }
+
+      // 1. Sight lines leave the source forward through G: keep the part of the source behind G.
+      let src = clipFacet(source, flipPlane(gen.plane));
+      if (!src) continue;
+      // 2. G must be in front of the original source portal.
+      let g = clipFacet(gen.winding, sourcePlane);
+      if (!g) continue;
+
+      if (pass) {
+        // 3. Clip G to the antipenumbra of (source, pass).
+        g = clipToSeparators(src, pass, g);
+        if (!g) continue;
+        // 4. Clip the source to the reverse antipenumbra of (G, pass).
+        if (clipSource) {
+          src = clipToSeparators(g, pass, src);
+          if (!src) continue;
+        }
+      }
+
+      vis.set(gid);
+      onChain[gen.to] = 1;
+      recurse(gen.to, src, g, newMight, depth + 1);
+      onChain[gen.to] = 0;
+      if (truncated) return;
+    }
+  };
+
+  onChain[sourcePortal.from] = 1;
+  onChain[sourcePortal.to] = 1;
+  recurse(sourcePortal.to, sourcePortal.winding, null, mightSee[sourceId], 1);
+  onChain.fill(0);
+
+  // If we were cut short, fall back to the conservative estimate for this portal.
+  return { sourceId, vis: truncated ? mightSee[sourceId].clone() : vis, steps, maxChainDepth, truncated };
+}
+
+/** Single-threaded portal flow over all source portals, in {@link portalFlowOrder}. */
+export function computePortalFlow<D extends Dim>(geometry: Geometry<D>, graph: PortalGraph<D>, mightSee: readonly BitSet[], options: Partial<PortalFlowOptions> = {}): PortalFlowResult {
+  const opts: PortalFlowOptions = { ...DEFAULT_PORTAL_FLOW_OPTIONS, ...options };
+  const n = graph.portals.length;
   const portalVis: BitSet[] = new Array(n);
-  const done = new Uint8Array(n);
   const onChain = new Uint8Array(graph.leafCount);
   let steps = 0;
   let maxChainDepth = 0;
   let truncated = false;
 
-  // Process portals that might see the least first: their final results then
-  // prune the searches of more complex portals (Quake's "sorted portals").
-  const order = [...portals.keys()].sort((a, b) => mightSee[a].count() - mightSee[b].count());
-
-  for (const sourceId of order) {
-    const sourcePortal = portals[sourceId];
+  for (const sourceId of portalFlowOrder(mightSee)) {
     if (truncated) {
       portalVis[sourceId] = mightSee[sourceId].clone();
-      done[sourceId] = 1;
       continue;
     }
-    const vis = new BitSet(n);
-    const sourcePlane = sourcePortal.plane;
-
-    const recurse = (leaf: number, source: Facet<D>, pass: Facet<D> | null, might: BitSet, depth: number): void => {
-      if (depth > maxChainDepth) maxChainDepth = depth;
-      for (const gid of portalsFrom[leaf]) {
-        if (!might.has(gid)) continue;
-        const gen = portals[gid];
-        if (onChain[gen.to]) continue; // a straight line cannot re-enter a convex leaf
-
-        // Prune: if G is already known visible and nothing new could be found beyond it, skip.
-        const newMight = might.and(done[gid] ? portalVis[gid] : mightSee[gid]);
-        if (vis.has(gid) && !newMight.hasAnyNotIn(vis)) continue;
-
-        if (opts.maxSteps > 0 && ++steps > opts.maxSteps) {
-          truncated = true;
-          return;
-        }
-
-        // 1. Sight lines leave the source forward through G: keep the part of the source behind G.
-        let src = clipFacet(source, flipPlane(gen.plane));
-        if (!src) continue;
-        // 2. G must be in front of the original source portal.
-        let g = clipFacet(gen.winding, sourcePlane);
-        if (!g) continue;
-
-        if (pass) {
-          // 3. Clip G to the antipenumbra of (source, pass).
-          g = clipToSeparators(src, pass, g);
-          if (!g) continue;
-          // 4. Clip the source to the reverse antipenumbra of (G, pass).
-          if (opts.clipSource) {
-            src = clipToSeparators(g, pass, src);
-            if (!src) continue;
-          }
-        }
-
-        vis.set(gid);
-        onChain[gen.to] = 1;
-        recurse(gen.to, src, g, newMight, depth + 1);
-        onChain[gen.to] = 0;
-        if (truncated) return;
-      }
-    };
-
-    onChain[sourcePortal.from] = 1;
-    onChain[sourcePortal.to] = 1;
-    recurse(sourcePortal.to, sourcePortal.winding, null, mightSee[sourceId], 1);
-    onChain.fill(0);
-
-    // If we were cut short, fall back to the conservative estimate for this portal too.
-    portalVis[sourceId] = truncated ? mightSee[sourceId].clone() : vis;
-    done[sourceId] = 1;
+    const budget = opts.maxSteps > 0 ? opts.maxSteps - steps : Infinity;
+    const r = flowFromSource(geometry, graph, mightSee, portalVis, sourceId, opts.clipSource, budget, onChain);
+    portalVis[sourceId] = r.vis;
+    steps += r.steps;
+    maxChainDepth = Math.max(maxChainDepth, r.maxChainDepth);
+    truncated = r.truncated;
   }
 
   return { portalVis, stats: { steps, maxChainDepth, truncated } };
