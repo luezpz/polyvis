@@ -1,14 +1,14 @@
 /** Terse helpers for writing 3D levels in code (samples, demos, tests). Not re-exported by the barrel. Z is up. */
 
-import { type Brush, type BrushKind, type Point2, makeBoxBrush, makeBrush, makePrismBrush } from "./brush";
+import { type Brush, type BrushKind, type Point2, makeBoxBrush, makeBrush, makePrismBrush, withDetail } from "./brush";
 import { type Level, LEVEL_FORMAT, LEVEL_VERSION } from "./level";
 import type { Plane3 } from "../math";
 
-/** A brush as an axis box `[x0, y0, z0, x1, y1, z1]`, a vertical prism over a footprint, or outward planes. */
+/** A brush as an axis box `[x0, y0, z0, x1, y1, z1]`, a vertical prism over a footprint, or outward planes; `detail` marks a non-cutting solid. */
 export type BrushSpec =
-  | { kind: BrushKind; box: [number, number, number, number, number, number] }
-  | { kind: BrushKind; prism: Point2[]; z0: number; z1: number }
-  | { kind: BrushKind; planes: Plane3[] };
+  | { kind: BrushKind; box: [number, number, number, number, number, number]; detail?: boolean }
+  | { kind: BrushKind; prism: Point2[]; z0: number; z1: number; detail?: boolean }
+  | { kind: BrushKind; planes: Plane3[]; detail?: boolean };
 
 /** Builds a level from specs; ids are 1-based spec order, degenerate specs are dropped. */
 export function build(specs: readonly BrushSpec[]): Level {
@@ -20,7 +20,7 @@ export function build(specs: readonly BrushSpec[]): Level {
       : "prism" in s
         ? makePrismBrush(id, s.kind, s.prism, s.z0, s.z1)
         : makeBrush(id, s.kind, s.planes);
-    if (b) brushes.push(b);
+    if (b) brushes.push(withDetail(b, s.detail));
   });
   return { format: LEVEL_FORMAT, version: LEVEL_VERSION, brushes, meshes: [] };
 }

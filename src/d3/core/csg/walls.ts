@@ -39,7 +39,7 @@ import {
 } from "../math";
 import type { Wall as SharedWall } from "../../../shared/core";
 import type { Dim3 } from "../geometry";
-import { type Brush, brushContains } from "../level";
+import { type Brush, brushContains, isStructural } from "../level";
 
 /** A boundary polygon of the empty space: convex, CCW seen from the empty side (its front). */
 export type Wall = SharedWall<Dim3>;
@@ -60,6 +60,17 @@ export function makeWall(winding: Winding, sourceId = -1): Wall | null {
   const plane = windingPlane(winding);
   if (!plane || windingArea(winding) < MIN_AREA) return null;
   return { winding, plane, sourceId };
+}
+
+/**
+ * Faces of the level's detail brushes, from the CSG of **all** brushes (so they are trimmed where
+ * they enter other solids or leave the rooms). Structural walls come from {@link buildWalls} over
+ * structural brushes only: dropping detail faces from the full CSG would leave holes (e.g. in the
+ * floor under a pillar) and the BSP would leak through them.
+ */
+export function buildDetailWalls(brushes: readonly Brush[]): Wall[] {
+  const detail = new Set(brushes.filter((b) => !isStructural(b)).map((b) => b.id));
+  return detail.size ? buildWalls(brushes).filter((w) => detail.has(w.sourceId)) : [];
 }
 
 /** Computes the walls of the CSG result of `brushes`. */

@@ -7,7 +7,8 @@
  *
  * `room` brushes carve walkable space (rooms, corridors). `solid` brushes put
  * matter back inside rooms (pillars, crates, dividing walls) and act as
- * occluders. Brush order does not matter.
+ * occluders. Brush order does not matter. Solids flagged `detail` are left out of
+ * the BSP (see {@link Brush.detail}).
  */
 
 import {
@@ -23,6 +24,12 @@ export interface Brush {
   readonly kind: BrushKind;
   /** Convex, counter-clockwise vertex loop. Use {@link makeBrush} to guarantee this. */
   readonly vertices: readonly Vec2[];
+  /**
+   * Detail brush (solid only; ignored on rooms): kept out of the CSG that feeds the BSP, so its
+   * faces never split leaves and it never blocks visibility (Quake "detail" brushes). The PVS
+   * stays conservative: dropping an occluder can only make more leaves visible. Absent = structural.
+   */
+  readonly detail?: boolean;
 }
 
 export const LEVEL_FORMAT = "polyvis-level-2d";
@@ -79,8 +86,18 @@ export function moveBrushEdge(brush: Brush, index: number, offset: number): Brus
     if (!line) continue;
     poly = clipPolygon(poly, i === index ? { n: line.n, d: line.d - offset } : line, NO_TAG);
   }
-  return poly ? makeBrush(brush.id, brush.kind, poly.vertices) : null;
+  const moved = poly ? makeBrush(brush.id, brush.kind, poly.vertices) : null;
+  return moved && withDetail(moved, brush.detail);
 }
+
+/** `brush` with its detail flag set to `detail` (the field is omitted when false, so structural brushes stay unchanged). */
+export function withDetail<B extends { readonly detail?: boolean }>(brush: B, detail: boolean | undefined): B {
+  const { detail: _old, ...rest } = brush;
+  return (detail ? { ...rest, detail: true } : rest) as B;
+}
+
+/** True if the brush takes part in the BSP: every room, and solids not flagged detail. */
+export const isStructural = (b: { readonly kind: string; readonly detail?: boolean }): boolean => b.kind === "room" || !b.detail;
 
 export const nextBrushId =(level: Level): number => level.brushes.reduce((m, b) => Math.max(m, b.id), 0) + 1;
 
@@ -111,7 +128,7 @@ export function parseLevel(json: string): Level {
     if (id < 0 || seen.has(id)) id = Math.max(0, ...seen) + 1;
     seen.add(id);
     const brush = makeBrush(id, kind, pts);
-    if (brush) brushes.push(brush);
+    if (brush) brushes.push(withDetail(brush, rb.detail === true));
   }
   return { format: LEVEL_FORMAT, version: LEVEL_VERSION, brushes };
 }

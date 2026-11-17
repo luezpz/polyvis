@@ -43,6 +43,16 @@ only decisions, gotchas and open items. The 2D/3D merge (former PLAN.md / PROGRE
   seeded maze/RNG in `shared/core/gen`. Single-threaded Node times: 2D Pillar forest ~11 s; 3D
   Oblique lattice ~110 s, almost all portal flow (near-total visibility over short pillars).
 
+- Detail brushes (`Brush.detail`, solid only) go through CSG twice: the BSP gets the CSG of
+  structural brushes only (`isStructural`), and `buildDetailWalls` takes the CSG of **all**
+  brushes and keeps the detail brushes' faces (`CompileResult.detailWalls`: trimmed, drawn,
+  never in the BSP). Rejected: one full CSG with detail faces dropped. That leaves holes in
+  structural faces (the floor under a pillar) and the BSP leaks. Detail brushes never occlude
+  (the PVS only grows, so it stays conservative). Non-cutting yet occluding is impossible: a
+  solid-leaf BSP has only solid/empty leaves, and portal flow sees only BSP walls. The flag is
+  ignored on rooms: a detail room would remove empty space. TODO: export `detailWalls` with
+  the leaves each face touches, so a game can PVS-cull them.
+
 ## Gotchas
 - Git history of the source repos (`polyvis2d` cdac3e9, `polyvis3d` 2de2526) was not carried over.
 

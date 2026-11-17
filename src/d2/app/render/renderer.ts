@@ -128,7 +128,7 @@ export class Renderer {
       this.painter.polygon(b.vertices, b.kind === "solid" ? c.fill : null, {
         color: c.stroke,
         width: selected ? 2.5 : 1,
-        dash: b.kind === "room" && !selected ? [4, 3] : [],
+        dash: (b.kind === "room" || b.detail) && !selected ? (b.detail ? [1, 3] : [4, 3]) : [], // detail solids: dotted
       });
     }
   }
@@ -149,6 +149,8 @@ export class Renderer {
       const m = midpoint(w.winding.a, w.winding.b);
       this.painter.line(m, addScaled(m, w.plane.n, tick), { color: COLORS.wallTick, width: 1 });
     }
+    // Detail faces: CSG-trimmed but not in the BSP; dashed to tell them apart.
+    for (const w of result.detailWalls) this.painter.line(w.winding.a, w.winding.b, { color: COLORS.wall, width: 2, dash: [3, 3] });
   }
 
   /**

@@ -1,12 +1,12 @@
 /** Terse helpers for writing levels in code (samples, demos, tests). Not re-exported by the barrel. */
 
-import { type Brush, type BrushKind, type Level, LEVEL_FORMAT, LEVEL_VERSION, makeBoxBrush, makeBrush } from "./level";
+import { type Brush, type BrushKind, type Level, LEVEL_FORMAT, LEVEL_VERSION, makeBoxBrush, makeBrush, withDetail } from "./level";
 import type { Vec2 } from "../math";
 
-/** A brush as an axis box `[x0, y0, x1, y1]` or as the convex hull of `points`. */
+/** A brush as an axis box `[x0, y0, x1, y1]` or as the convex hull of `points`; `detail` marks a non-cutting solid. */
 export type BrushSpec =
-  | { kind: BrushKind; box: [number, number, number, number] }
-  | { kind: BrushKind; points: Vec2[] };
+  | { kind: BrushKind; box: [number, number, number, number]; detail?: boolean }
+  | { kind: BrushKind; points: Vec2[]; detail?: boolean };
 
 /** Builds a level from specs; ids are 1-based spec order, degenerate specs are dropped. */
 export function build(specs: readonly BrushSpec[]): Level {
@@ -15,7 +15,7 @@ export function build(specs: readonly BrushSpec[]): Level {
     const b = "box" in s
       ? makeBoxBrush(i + 1, s.kind, { x: s.box[0], y: s.box[1] }, { x: s.box[2], y: s.box[3] })
       : makeBrush(i + 1, s.kind, s.points);
-    if (b) brushes.push(b);
+    if (b) brushes.push(withDetail(b, s.detail));
   });
   return { format: LEVEL_FORMAT, version: LEVEL_VERSION, brushes };
 }

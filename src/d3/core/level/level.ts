@@ -7,7 +7,8 @@
  *
  * `room` brushes carve walkable space (rooms, corridors, shafts). `solid`
  * brushes put matter back inside rooms (pillars, floors between storeys,
- * crates) and act as occluders. Brush order does not matter.
+ * crates) and act as occluders. Brush order does not matter. Solids flagged
+ * `detail` are left out of the BSP (see {@link Brush.detail}).
  *
  * A level may additionally hold imported *meshes* (e.g. from Blender): raw
  * polygons with empty space in front, fed to the BSP without CSG. Meshes need
@@ -15,7 +16,7 @@
  */
 
 import { type Plane3, type Vec3, type Winding, windingPlane, sanitizeWinding } from "../math";
-import { type Brush, type BrushKind, makeBrush } from "./brush";
+import { type Brush, type BrushKind, makeBrush, withDetail } from "./brush";
 
 export const LEVEL_FORMAT = "polyvis-level-3d";
 export const LEVEL_VERSION = 1;
@@ -53,7 +54,7 @@ export function serializeLevel(level: Level): string {
   return JSON.stringify({
     format: level.format,
     version: level.version,
-    brushes: level.brushes.map((b) => ({ id: b.id, kind: b.kind, planes: b.planes.map((p) => [p.n.x, p.n.y, p.n.z, p.d]) })), // full precision: rounding planes moves vertices
+    brushes: level.brushes.map((b) => ({ id: b.id, kind: b.kind, ...(b.detail ? { detail: true } : {}), planes: b.planes.map((p) => [p.n.x, p.n.y, p.n.z, p.d]) })), // full precision: rounding planes moves vertices
     meshes: level.meshes.map((m) => ({ id: m.id, name: m.name, faces: m.faces.map((f) => f.map(p3)) })),
   }, null, 1);
 }
@@ -84,7 +85,7 @@ export function parseLevel(json: string): Level {
     if (id < 0 || seen.has(id)) id = Math.max(0, ...seen) + 1;
     seen.add(id);
     const brush = makeBrush(id, kind, planes);
-    if (brush) brushes.push(brush);
+    if (brush) brushes.push(withDetail(brush, rb.detail === true));
   }
 
   const meshes: ImportedMesh[] = [];

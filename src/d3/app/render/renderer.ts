@@ -167,6 +167,8 @@ export class Renderer {
       }
       for (const s of surfs) tb.polygon(s.winding, result.walls[s.wall].plane.n, color);
     });
+    // Detail faces belong to no leaf (they are not in the BSP), so they stay neutral.
+    for (const w of result.detailWalls) tb.polygon(w.winding, w.plane.n, n);
     return tb.build();
   }
 
@@ -174,7 +176,7 @@ export class Renderer {
     const lb = new LineBuilder();
     if (!result) return lb.build();
     const { layers } = view;
-    if (layers.walls) for (const w of result.walls) lb.loop(w.winding, GL_COLORS.wall);
+    if (layers.walls) for (const w of [...result.walls, ...result.detailWalls]) lb.loop(w.winding, GL_COLORS.wall);
     if (layers.leaves) {
       for (const leaf of result.tree.leaves) {
         if (leaf.contents !== "empty" || !leaf.region) continue;
