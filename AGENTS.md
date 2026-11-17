@@ -40,10 +40,10 @@ src/shared/core/      dimension-agnostic compiler, generic over D extends Dim
   gen/maze.ts         seeded RNG + maze generator for demo levels
 src/d2/core/          2D kernel: Vec2, Line2, Segment, ConvexPolygon; CSG; portal discovery;
                       2D antipenumbra; line-of-sight analysis; geometry.ts (geometry2);
-                      pipeline binding; export
+                      pipeline binding; export; level/ (samples, demos, builder)
 src/d3/core/          3D kernel: Vec3, Plane3, Winding, ConvexPolyhedron, brushes as planes;
                       CSG + mesh walls; OBJ import; 3D antipenumbra; line-of-sight analysis;
-                      geometry.ts (geometry3); pipeline binding; export
+                      geometry.ts (geometry3); pipeline binding; export; level/
 src/shared/app/        browser code shared by both editors (never imported by core)
   editor/             history, BaseViewState (layers, probe, snapping)
   compile/            CompileClient<D, L>, worker protocol + hydrateResult, serveCompiler,

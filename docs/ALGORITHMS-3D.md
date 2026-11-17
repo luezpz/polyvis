@@ -72,6 +72,10 @@ Unchanged from 2D apart from the primitives:
 - `minCellSize`: refinement splits leaving a side thinner than this are rejected. The 3D
   default is 1 (2D: 0.5), since cells, portals and flow time grow much faster in 3D.
 
+**Parallel build** (`shared/core/bsp/parallelBuild.ts`): shared code, identical to 2D (see
+ALGORITHMS-2D §2). Only the packing of walls and cells into flat messages is per dimension
+(`d3/core/pack.ts`, `Geometry.pack*`).
+
 **Leaf surfaces** (`shared/core/bsp/surfaces.ts`, Quake's marksurfaces): each wall is pushed down the tree
 (split where it spans a plane; a wall lying on a plane goes to the side it faces), so every
 empty leaf knows the wall pieces bounding it. The editor renders these; the export lists them.
@@ -110,6 +114,10 @@ Shrinking `source` and `pass` is conservative: any real sight line through the c
 every clipped winding. Portals are processed in increasing "might see" size so finished results
 prune later searches. `maxSteps` falls back to base vis if a level explodes combinatorially.
 
+**Parallel flow** (`shared/core/vis/parallelFlow.ts`): shared and exact, as in 2D (see
+ALGORITHMS-2D §5). 3D levels with near-total visibility (e.g. the "Oblique lattice" demo) give
+long dependency chains and little concurrency.
+
 ## 6. Leaf PVS (`shared/core/vis/leafPvs.ts`)
 
 Unchanged: `PVS(leaf) = {leaf} ∪ neighbours ∪ ⋃_{p ∈ portalsFrom(leaf)} { q.to | q ∈ portalVis[p] }`,
@@ -128,6 +136,10 @@ leaves, the leaves stay convex, and decoding returns the original PVS bit for bi
 crosses no wall polygon, the PVS **must** contain the target leaf. That invariant
 (PVS ⊇ true visibility) is the definition of a correct PVS. The editor's "True line of sight"
 layer shows the same thing interactively: rays from the probe, red dots would be misses.
+
+`tests/d3/parallelBsp.test.ts` and `tests/d3/parallelFlow.test.ts` check the parallel stages
+equal the sequential ones; `tests/d3/demos.test.ts` runs leak,
+sight-line and conservativeness checks on the cheap demo levels.
 
 ## Mesh input (Blender)
 

@@ -65,6 +65,19 @@ Each node carries its convex region (the bounding box, expanded by `boundsMargin
 ancestor planes); leaves keep theirs. The bounding box keeps regions finite even when the level
 leaks.
 
+**Parallel build** (`shared/core/bsp/parallelBuild.ts`) yields the same tree as `buildBsp`. The
+two children of a node are independent once its fragments are partitioned, so `buildBsp` itself
+is one subtree task plus `assembleTree`, which splices subtrees in preorder and renumbers their
+refinement planes (`Geometry.retagCell`). Splitter scoring costs O(candidates × fragments), so
+the levels near the root dominate and farming out subtrees alone caps the speed-up near 2x.
+Instead the main thread walks the top of the tree and, at each big node, every worker scores one
+chunk of candidate planes (lowest score wins, ties to the earliest chunk = the sequential
+choice). Small nodes and empty regions become subtree tasks, run after the top walk, largest
+first. Messages are flat arrays (`bsp/pack.ts`); fragments are never sent, workers re-derive
+them by repeating the parent's partition. The editors use it from 300 walls with at most 4
+threads (`shared/app/compile/bspPool.ts`); more threads were slower (serial setup dominates).
+Caveat: plane interning is tolerance-based, so two nearly equal planes could intern differently.
+
 ## 3. Portals (`d2/core/portals/portals.ts`)
 
 Two empty leaves are adjacent iff they have edges tagged with the same plane, one leaf in front of
@@ -114,6 +127,19 @@ every clipped winding. Portals are processed in increasing "might see" size so f
 (`portalVis`) can replace `mightSee` for pruning, as Quake does. A `maxSteps` safety valve falls
 back to base vis if a pathological level explodes combinatorially.
 
+**Parallel flow** (`shared/core/vis/parallelFlow.ts`) gives exactly the same `portalVis`. Source
+*i* reads finished rows only for portals in its `might` set, which is a subset of `mightSee[i]`,
+so it depends exactly on
+
+    deps(i) = { j ∈ mightSee[i] : rank(j) < rank(i) }    (rank = position in the flow order)
+
+and is dispatched as soon as those are finished, together with their rows (batches of up to
+`MAX_BATCH` = 8 ready sources per call). Workers ignore rows of later sources via `rank`.
+Mutually invisible areas run concurrently; open levels form a near-chain and run nearly serially
+(still correct). Exactness only breaks when `maxSteps` is hit, since the budget is checked at
+dispatch. The editors use cores − 1 workers (max 16) from 200 portals
+(`shared/app/compile/flowPool.ts`); smaller graphs, or no nested-worker support, use one thread.
+
 ## 6. Leaf PVS (`shared/core/vis/leafPvs.ts`)
 
 `PVS(leaf) = {leaf} ∪ neighbours ∪ ⋃_{p ∈ portalsFrom(leaf)} { q.to | q ∈ portalVis[p] }`.
@@ -131,6 +157,10 @@ are the same shared code as in 3D; see [ALGORITHMS-3D.md](ALGORITHMS-3D.md). The
 between them crosses no wall, the PVS **must** contain the target leaf. That invariant (PVS ⊇ true
 visibility) is the definition of a correct PVS. The editor's "True line of sight" layer shows the
 same thing interactively.
+
+`tests/d2/parallelBsp.test.ts` and `tests/d2/parallelFlow.test.ts` check the parallel stages
+(with in-process workers) give results equal to the sequential ones; `tests/d2/demos.test.ts`
+runs leak, sight-line and conservativeness checks on the cheap demo levels.
 
 ## 2D vs 3D
 

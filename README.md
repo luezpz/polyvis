@@ -12,7 +12,10 @@ brushes ──CSG──▶ walls ──BSP──▶ convex cells ──▶ porta
 The project has **two editors over one compiler core**:
 
 - **2D** (Canvas2D): the simplest setting, used as a testbed for new ideas.
-- **3D** (WebGL2): convex polyhedral brushes, OBJ import, compiles in a Web Worker.
+- **3D** (WebGL2): convex polyhedral brushes, OBJ import.
+
+Both editors compile in a Web Worker, which runs the BSP build and portal flow on a pool of
+nested workers on large levels (same results as single-threaded).
 
 Everything from the BSP onwards (BSP build and refinement, leaf surfaces, leaks, base vis,
 portal flow, leaf PVS, PVS row sharing) is **one implementation** in `src/shared/core`,
@@ -45,6 +48,9 @@ Requires Node 20.19+ or 22.12+ (Vite 8) (and WebGL2 for the 3D editor). Zero run
   pillars put back inside rooms). With a brush selected in Select mode, `K` toggles that brush.
 - Wheel zooms; middle/right drag or `Space`+drag pans; `F` fits the view; `Ctrl+Z` / `Ctrl+Y` undo/redo.
 - The level recompiles in a Web Worker on every edit and is autosaved to `localStorage`.
+- The level menu lists the basic samples plus demo groups: **Heavy** (for timing), **Worst
+  case** (shapes that blow up one stage) and **Edge case** (degenerate contacts, numerics).
+  The same menu exists in the 3D editor.
 - **Save…/Open…** read and write the level as JSON. **Export PVS** writes the compiled
   BSP + portals + PVS as JSON or as a line-based text file.
 
@@ -123,10 +129,13 @@ see `src/d2/core/export/pvsExport.ts`.
 ```
 src/
   shared/core/   dimension-agnostic compiler (generic over the geometry; see geometry.ts)
-  shared/app/    browser code both editors use (history, compile worker client, UI widgets)
-  d2/core/       2D kernel (Vec2, lines, segments, polygons), CSG, portals, export
+  shared/app/    browser code both editors use (history, compile worker client, nested worker
+                 pool for parallel BSP / flow, UI widgets)
+  d2/core/       2D kernel (Vec2, lines, segments, polygons), CSG, portals, export,
+                 level/ (samples, demos, builder helpers)
   d2/app/        Canvas2D editor + compile worker
-  d3/core/       3D kernel (Vec3, planes, windings, polyhedra, brushes), CSG, OBJ import, export
+  d3/core/       3D kernel (Vec3, planes, windings, polyhedra, brushes), CSG, OBJ import, export,
+                 level/ (samples, demos, builder helpers)
   d3/app/        WebGL2 editor + compile worker
 tests/{shared,d2,d3}/   vitest suites
 docs/            algorithm notes

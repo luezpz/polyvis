@@ -87,6 +87,10 @@ Files: `src/shared/core/pipeline.ts`, `src/d3/core/pipeline.ts`
 
 **Where it runs:** the editor (`3d.html` → `src/d3/app`) sends the level to a Web Worker through
 `CompileClient`. The worker calls `compileLevel` and posts back the result by structured clone.
+On large levels the worker hands the BSP build (from 300 walls) and portal flow (from 200
+portals) to a pool of nested workers (`shared/app/compile/workerPool.ts`, entry
+`d3/app/compile/poolWorker.ts`, served by `servePool.ts`); results equal the single-threaded
+ones (§5, §11).
 `shared/app/compile/protocol.ts` (`hydrateResult`) turns the plain objects back into `BitSet`
 instances.
 
@@ -264,6 +268,27 @@ File: `src/shared/core/bsp/build.ts` (shared with 2D)
 
 Child refs: `>= 0` is a node index, `< 0` is a leaf stored as `~leafIndex`.
 
+### Parallel build
+
+File: `src/shared/core/bsp/parallelBuild.ts`
+
+```text
+ 1  top walk on main thread, for node with frags, region:
+ 2      if frags small or empty region: queue subtree task; return
+ 3      S = min over workers w of scoreSplitters(chunk_w of candidates)
+ 4      F, B = partition(frags, S)            // workers repeat it on their copy
+ 5      walk(F, frontRegion); walk(B, backRegion)
+ 6  run queued subtree tasks largest first, each on the next idle worker
+ 7  tree = assembleTree(skeleton, subtrees)
+```
+
+| Line | Explanation |
+|---|---|
+| 2 | Below the top of the tree, scoring is cheap; whole subtrees are farmed out instead. They start only after the top walk, so they never stall it. |
+| 3 | Root scoring is ~40% of the build. Lowest score wins, ties to the earliest chunk: the same choice as the sequential build. |
+| 4 | Fragments are never sent; every worker keeps the big nodes' fragments and re-derives children. Messages are flat arrays (`bsp/pack.ts`). |
+| 7 | Splices subtrees in preorder and renumbers their refinement planes (`Geometry.retagCell`), giving the sequential tree. `buildBsp` is exactly this with one task. |
+
 ---
 
 ## 6. Empty-leaf refinement
@@ -425,6 +450,25 @@ File: `src/shared/core/vis/portalFlow.ts` (Teller; Quake `vis`)
 | 19 | Continue past G with the shrunken windings. Shrinking stays **conservative**: any real sight line crosses every clipped winding. |
 | 20 | `maxSteps` guards against combinatorial blow-up; base vis is always a safe answer. |
 
+### Parallel flow
+
+File: `src/shared/core/vis/parallelFlow.ts`
+
+```text
+ 1  rank[S] = position of S in order
+ 2  deps(S) = { J in mightSee[S] : rank[J] < rank[S] }
+ 3  ready = sources with no deps
+ 4  while sources remain:
+ 5      give an idle worker up to 8 ready sources + the finished rows they need
+ 6      on result: store rows; sources whose deps are now all done become ready
+```
+
+| Line | Explanation |
+|---|---|
+| 2 | Line 10 above reads finished rows only for portals in `might ⊆ mightSee[S]`, and single-threaded only earlier sources are finished. So these are exactly the rows S's result depends on. |
+| 5 | Workers may hold rows of later sources; `rank` makes them ignore those, so each result equals the sequential one. |
+| 6 | Unless `maxSteps` is hit (budget checked at dispatch), `portalVis` is identical to single-threaded flow. |
+
 ---
 
 ## 12. Separators (antipenumbra)
@@ -542,6 +586,8 @@ Files: `src/d3/core/export/pvsExport.ts`, `src/d3/core/bsp/query.ts`,
 | `tests/d3/vis.test.ts` | **Conservativeness.** Random point pairs in random leaves of sample and randomly generated levels: if the segment between them crosses no wall, the PVS *must* contain the target leaf. Never weaken this test. |
 | `tests/d3/csg-bsp.test.ts` | CSG output is watertight (Σ area·n = 0) and the BSP is consistent. |
 | `tests/shared` | Both geometry kernels obey the same `Geometry<D>` contract. |
+| `tests/d3/parallelBsp.test.ts`, `parallelFlow.test.ts` | The parallel BSP build and portal flow give results equal to the sequential ones. |
+| `tests/d3/demos.test.ts` | The cheap demo levels: no leaks, expected components, specific sight lines blocked/open, and the conservativeness check. |
 | Editor "True line of sight" layer | The same check, live: rays from the probe; a red dot would be a missed leaf. |
 
 ### Shared vs. 3D-specific code
