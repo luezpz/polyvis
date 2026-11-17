@@ -8,7 +8,7 @@
 
 import {
   type Brush, type BrushKind, type ImportedMesh, type Level, type Point2, type Vec3,
-  emptyLevel, makeBoxBrush, makeBrush, makePrismBrush, moveBrushFace, nextBrushId, nextMeshId, translateBrush,
+  emptyLevel, makeBoxBrush, makeBrush, makePrismBrush, moveBrushFace, nextBrushId, nextMeshId, translateBrush, withDetail,
 } from "../../core";
 import { History } from "../../../shared/app/editor/history";
 
@@ -118,7 +118,12 @@ export class EditorModel {
   }
 
   setKind(id: number, kind: BrushKind): void {
-    this.replaceBrush(id, (b) => makeBrush(b.id, kind, b.planes));
+    this.replaceBrush(id, (b) => { const n = makeBrush(b.id, kind, b.planes); return n && withDetail(n, b.detail); });
+  }
+
+  /** Flags a solid brush as detail (non-cutting) or structural. */
+  setDetail(id: number, detail: boolean): void {
+    this.replaceBrush(id, (b) => withDetail(b, detail));
   }
 
   /** Moves a brush to `original` translated by `delta` (gesture-friendly: always relative to the original). */
@@ -140,7 +145,8 @@ export class EditorModel {
     const b = this._level.brushes.find((x) => x.id === id);
     if (!b) return;
     const moved = translateBrush(b, offset);
-    if (moved) this.addBrushObject(makeBrush(nextBrushId(this._level), b.kind, moved.planes));
+    const copy = moved && makeBrush(nextBrushId(this._level), b.kind, moved.planes);
+    if (copy) this.addBrushObject(withDetail(copy, b.detail));
   }
 
   addMesh(name: string, faces: ImportedMesh["faces"]): void {

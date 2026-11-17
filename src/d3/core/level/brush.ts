@@ -32,6 +32,12 @@ export interface Brush {
   /** `faces[i]` lies on `planes[i]`. */
   readonly faces: readonly BrushFace[];
   readonly bounds: Aabb;
+  /**
+   * Detail brush (solid only; ignored on rooms): kept out of the CSG that feeds the BSP, so its
+   * faces never split leaves and it never blocks visibility (Quake "detail" brushes). The PVS
+   * stays conservative: dropping an occluder can only make more leaves visible. Absent = structural.
+   */
+  readonly detail?: boolean;
 }
 
 /** A 2D point, used for prism footprints. */
@@ -84,6 +90,15 @@ function brushFaces(planes: readonly Plane3[], center: Vec3, halfSize: number): 
   return faces;
 }
 
+/** `brush` with its detail flag set to `detail` (the field is omitted when false, so structural brushes stay unchanged). */
+export function withDetail<B extends { readonly detail?: boolean }>(brush: B, detail: boolean | undefined): B {
+  const { detail: _old, ...rest } = brush;
+  return (detail ? { ...rest, detail: true } : rest) as B;
+}
+
+/** True if the brush takes part in the BSP: every room, and solids not flagged detail. */
+export const isStructural = (b: { readonly kind: string; readonly detail?: boolean }): boolean => b.kind === "room" || !b.detail;
+
 /** Axis-aligned box brush spanning two corners. */
 export function makeBoxBrush(id: number, kind: BrushKind, a: Vec3, b: Vec3): Brush | null {
   const x0 = Math.min(a.x, b.x), x1 = Math.max(a.x, b.x);
@@ -121,12 +136,14 @@ export function makePrismBrush(id: number, kind: BrushKind, footprint: readonly 
 
 /** The brush moved by `delta` (null if `delta` is not finite). */
 export function translateBrush(brush: Brush, delta: Vec3): Brush | null {
-  return makeBrush(brush.id, brush.kind, brush.planes.map((p) => ({ n: p.n, d: p.d + dot(p.n, delta) })));
+  const moved = makeBrush(brush.id, brush.kind, brush.planes.map((p) => ({ n: p.n, d: p.d + dot(p.n, delta) })));
+  return moved && withDetail(moved, brush.detail);
 }
 
 /** The brush with face `index` pushed outwards by `offset` (pulled in if negative). Null if that degenerates it. */
 export function moveBrushFace(brush: Brush, index: number, offset: number): Brush | null {
-  return makeBrush(brush.id, brush.kind, brush.planes.map((p, i) => (i === index ? { n: p.n, d: p.d + offset } : p)));
+  const moved = makeBrush(brush.id, brush.kind, brush.planes.map((p, i) => (i === index ? { n: p.n, d: p.d + offset } : p)));
+  return moved && withDetail(moved, brush.detail);
 }
 
 /** All vertices of the brush (face corners, shared corners repeated). */

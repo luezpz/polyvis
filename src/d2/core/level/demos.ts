@@ -127,6 +127,10 @@ export const DEMO_LEVELS: readonly SampleLevel[] = [
     create: () => build([{ kind: "room", points: ngon(0, 0, 12, 64) }, { kind: "solid", points: ngon(0, 0, 4, 32) }]),
   },
   {
+    group: EDGE, name: "Round room (detail pillar)", description: "Round room with the pillar as a detail brush: drawn, but it neither cuts the BSP nor blocks sight.",
+    create: () => build([{ kind: "room", points: ngon(0, 0, 12, 64) }, { kind: "solid", points: ngon(0, 0, 4, 32), detail: true }]),
+  },
+  {
     group: EDGE, name: "Needle", description: "A 100-long, 0.2-wide corridor into a sliver triangle: extreme aspect ratios.",
     create: () => build([room(-8, -4, 0, 4), room(0, -0.1, 100, 0.1), { kind: "room", points: [{ x: 100, y: -0.3 }, { x: 130, y: 0 }, { x: 100, y: 0.3 }] }]),
   },

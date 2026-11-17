@@ -40,6 +40,11 @@ export interface VisSummary {
 
 export interface CompileResult<D extends Dim> {
   readonly walls: readonly Wall<D>[];
+  /**
+   * Faces of detail brushes from the full CSG (all brushes): trimmed by rooms and other solids,
+   * drawn by a game but never given to the BSP. Empty for raw-wall compiles.
+   */
+  readonly detailWalls: readonly Wall<D>[];
   readonly tree: BspTree<D>;
   readonly bspStats: BspStats;
   /** `surfaces[leaf]` = wall pieces bounding each empty leaf. */
@@ -66,6 +71,8 @@ export interface CompilerConfig<D extends Dim, L> {
   readonly bspDefaults: BspBuildOptions;
   /** Level → walls (CSG of the brushes, plus any raw geometry). */
   readonly levelWalls: (level: L) => Wall<D>[];
+  /** Level → detail brush faces (full CSG); none if omitted. */
+  readonly detailWalls?: (level: L) => Wall<D>[];
   /** Portal discovery between the empty leaves of a tree. */
   readonly buildPortalGraph: (tree: BspTree<D>) => PortalGraph<D>;
 }
@@ -108,7 +115,7 @@ export function createCompiler<D extends Dim, L>(config: CompilerConfig<D, L>): 
     const { portalVis, stats: flowStats } = flow;
     const pvs = timed(timings, "leaf pvs", () => computeLeafPvs(tree, graph, portalVis, opts.symmetry));
     const pvsTable = timed(timings, "pvs rows", () => buildPvsTable(pvs));
-    return { ...pre, portalVis, flowStats, pvs, pvsTable, summary: summarize(tree, graph, mightSee, portalVis, pvs), timings };
+    return { ...pre, detailWalls: [], portalVis, flowStats, pvs, pvsTable, summary: summarize(tree, graph, mightSee, portalVis, pvs), timings };
   };
 
   const compileWalls = (walls: readonly Wall<D>[], options: Partial<CompileOptions> = {}, timings: StageTiming[] = []): CompileResult<D> => {
@@ -122,8 +129,13 @@ export function createCompiler<D extends Dim, L>(config: CompilerConfig<D, L>): 
   const compileLevel = (level: L, options: Partial<CompileOptions> = {}): CompileResult<D> => {
     const timings: StageTiming[] = [];
     const walls = timed(timings, "csg", () => config.levelWalls(level));
-    return compileWalls(walls, options, timings);
+    const detailWalls = levelDetailWalls(level, timings);
+    return { ...compileWalls(walls, options, timings), detailWalls };
   };
+
+  /** Detail faces of a level, timed as "detail csg" when the dimension provides them. */
+  const levelDetailWalls = (level: L, timings: StageTiming[]): Wall<D>[] =>
+    config.detailWalls ? timed(timings, "detail csg", () => config.detailWalls!(level)) : [];
 
   const bspOptions = (opts: CompileOptions): BspBuildOptions => ({ ...config.bspDefaults, ...opts.bsp });
 
@@ -131,6 +143,7 @@ export function createCompiler<D extends Dim, L>(config: CompilerConfig<D, L>): 
     const opts: CompileOptions = { ...DEFAULT_COMPILE_OPTIONS, ...options };
     const timings: StageTiming[] = [];
     const walls = timed(timings, "csg", () => config.levelWalls(level));
+    const detailWalls = levelDetailWalls(level, timings);
     const tb = performance.now();
     const bsp = runBsp ? await runBsp(walls, bspOptions(opts)) : buildBsp(g, walls, bspOptions(opts));
     timings.push({ stage: "bsp", ms: performance.now() - tb });
@@ -138,7 +151,7 @@ export function createCompiler<D extends Dim, L>(config: CompilerConfig<D, L>): 
     const t0 = performance.now();
     const flow = await runFlow(pre.graph, pre.mightSee, opts.flow);
     timings.push({ stage: "portal flow", ms: performance.now() - t0 });
-    return afterFlow(pre, flow, opts, timings);
+    return { ...afterFlow(pre, flow, opts, timings), detailWalls };
   };
 
   return { compileLevel, compileWalls, compileLevelAsync };

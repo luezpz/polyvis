@@ -6,9 +6,9 @@
 
 import * as shared from "../../shared/core";
 import { DEFAULT_BSP_OPTIONS } from "./bsp";
-import { type Wall, buildWalls, buildMeshWalls } from "./csg";
+import { type Wall, buildDetailWalls, buildWalls, buildMeshWalls } from "./csg";
 import { type Dim3, geometry3 } from "./geometry";
-import type { Level } from "./level";
+import { type Level, isStructural } from "./level";
 import { buildPortalGraph } from "./portals";
 
 export { type CompileOptions, type StageTiming, type VisSummary, DEFAULT_COMPILE_OPTIONS } from "../../shared/core";
@@ -18,7 +18,8 @@ export type CompileResult = shared.CompileResult<Dim3>;
 const compiler = shared.createCompiler<Dim3, Level>({
   geometry: geometry3,
   bspDefaults: DEFAULT_BSP_OPTIONS,
-  levelWalls: (level) => [...buildWalls(level.brushes), ...buildMeshWalls(level.meshes)],
+  levelWalls: (level) => [...buildWalls(level.brushes.filter(isStructural)), ...buildMeshWalls(level.meshes)],
+  detailWalls: (level) => buildDetailWalls(level.brushes),
   buildPortalGraph,
 });
 
