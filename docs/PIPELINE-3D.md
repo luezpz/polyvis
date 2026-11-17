@@ -53,7 +53,7 @@ Files: `src/shared/core/pipeline.ts`, `src/d3/core/pipeline.ts`
 
 ```text
  1  function compileLevel(level, opts):
- 2      walls = CSG(level.brushes) + meshWalls(level.meshes)
+ 2      walls = CSG(structural brushes) + meshWalls(level.meshes)   // detail brushes: separate CSG, see §3
  3      return compileWalls(walls, opts)
  4
  5  function compileWalls(walls, opts):
@@ -133,6 +133,12 @@ File: `src/d3/core/csg/walls.ts`
 
 Rule: **empty = (union of room brushes) − (union of solid brushes)**. A wall is any piece of a
 brush face that has empty space on exactly one side.
+
+**Detail brushes** (`Brush.detail`, solids only) are kept out of the BSP: the pipeline runs this
+CSG over the *structural* brushes (`isStructural`) for the BSP input, and again over *all* brushes
+(`buildDetailWalls`) to get the detail brushes' trimmed faces, returned as
+`CompileResult.detailWalls`. They never split leaves or occlude, so the PVS stays conservative.
+Dropping detail faces from a single full CSG would leave holes under them and leak.
 
 ### 3a. Fragmentation
 

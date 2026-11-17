@@ -46,6 +46,9 @@ Requires Node 20.19+ or 22.12+ (Vite 8) (and WebGL2 for the 3D editor). Zero run
 
 - `K` toggles between **room** brushes (carve empty space) and **solid** brushes (occluders such as
   pillars put back inside rooms). With a brush selected in Select mode, `K` toggles that brush.
+- **Make detail** (selection panel, solids only) turns a solid into a *detail brush*: it still goes
+  through CSG and is drawn (dotted outline, dashed wall lines), but its faces stay out of the BSP,
+  so it does not split cells or block visibility. Try the "Round room (detail pillar)" demo.
 - Wheel zooms; middle/right drag or `Space`+drag pans; `F` fits the view; `Ctrl+Z` / `Ctrl+Y` undo/redo.
 - The level recompiles in a Web Worker on every edit and is autosaved to `localStorage`.
 - The level menu lists the basic samples plus demo groups: **Heavy** (for timing), **Worst
@@ -84,6 +87,8 @@ The world is **Z-up**, 1 unit ≈ 1 m. Brushes are drawn on a horizontal **work 
   the selection panel snaps it to the selected brush.
 - `K` toggles **room** brushes (carve empty space) and **solid** brushes (put matter back:
   pillars, slabs between storeys, ramps). With a brush selected in Select mode, `K` toggles it.
+  **Make detail** (selection panel, solids only) keeps a solid out of the BSP (no cell splits, no
+  occlusion) while CSG still trims and draws it; see the "Round room (detail pillar)" demo.
 - `Ctrl+Z` / `Ctrl+Y` undo/redo. The level recompiles in a Web Worker on every edit and is
   autosaved to `localStorage`. **Save…/Open…** use JSON (`polyvis-level-3d`).
 - **Probe from camera position**: the PVS of the camera's own leaf. Zoom in close, fly through

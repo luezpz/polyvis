@@ -46,6 +46,14 @@ vertices exact. Editing operations (translate, push a face) just change plane di
 The result is watertight (`tests/d3/csg-bsp.test.ts` checks that Σ area·n = 0). Imported meshes
 skip this stage (`d3/core/csg/meshWalls.ts`).
 
+**Detail brushes.** A solid with `detail: true` is a non-cutting brush. The BSP is fed
+`buildWalls(structural brushes)` only (`isStructural`: all rooms, solids not flagged), so detail
+faces never split leaves and never occlude (the PVS only grows: still conservative).
+`buildDetailWalls` runs the same CSG over **all** brushes and keeps the detail brushes' faces
+(`CompileResult.detailWalls`), trimmed where they sink into other solids or leave the rooms. One
+CSG with detail faces dropped afterwards is wrong: structural faces beneath the detail brush
+(floor under a pillar) would be missing and the BSP would leak. Ignored on rooms.
+
 ## 2. Solid-leaf BSP (`shared/core/bsp/build.ts`)
 
 Unchanged from 2D apart from the primitives:

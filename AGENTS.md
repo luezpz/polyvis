@@ -119,4 +119,6 @@ Features should land in both dimensions; record any intentional parity gap in NO
 
 - 2D and 3D default `minCellSize` differ (0.5 vs 1): defaults live in each `bsp/bsp.ts`.
 - Autosave keys differ per editor (`polyvis.level.v1`, `polyvis3d.level.v1`); same origin now.
+- Detail brushes (`Brush.detail`) are not in the BSP: `CompileResult.walls` is structural only; their
+  CSG-trimmed faces are `detailWalls` (indices in `surfaces` refer to `walls`). See NOTES.md.
 - `git` history of the original repos is not carried over (see NOTES.md).
