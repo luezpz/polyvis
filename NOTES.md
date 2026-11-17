@@ -1,6 +1,6 @@
 # NOTES
 
-Session memory. Architecture, commands and conventions live in `AGENTS.md`; this file holds
+Session memory. Architecture, commands and conventions live in `CLAUDE.md`; this file holds
 only decisions, gotchas and open items. The 2D/3D merge (former PLAN.md / PROGRESS.md) is done.
 
 ## Key decisions

@@ -144,7 +144,7 @@ src/
   d3/app/        WebGL2 editor + compile worker
 tests/{shared,d2,d3}/   vitest suites
 docs/            algorithm notes
-AGENTS.md        contributor/agent guide · NOTES.md decisions and open TODOs
+CLAUDE.md        contributor/agent guide · NOTES.md decisions and open TODOs
 ```
 
 ## References
