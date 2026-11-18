@@ -65,3 +65,6 @@ only decisions, gotchas and open items. The 2D/3D merge (former PLAN.md / PROGRE
 - Base vis (`computeBaseVis`) is the biggest stage on large levels (118 s vs 2.7 s BSP at 300
   rooms) and is still single-threaded: the next parallelization target.
 - Open decision: merge the two editor shells (panel/app) further, or keep sharing helpers only.
+- PAS (Potentially Audible Set) baking
+- Convex hulls generation (for physics engines, navmesh, etc.)
+- Lightmap baking
