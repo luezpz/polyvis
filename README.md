@@ -29,6 +29,7 @@ npm install
 npm run dev        # http://localhost:5173 → pick 2D or 3D
 npm test           # unit tests + randomized line-of-sight ground-truth checks (both dimensions)
 npm run build      # typecheck + production bundle in dist/
+npm run bench      # per-level compile timings and flow counters (docs/OPTIMIZATION-PLAN.md)
 ```
 
 Requires Node 20.19+ or 22.12+ (Vite 8) (and WebGL2 for the 3D editor). Zero runtime dependencies.

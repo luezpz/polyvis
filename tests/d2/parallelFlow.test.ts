@@ -16,10 +16,17 @@ describe("parallel portal flow (dependency scheduling)", () => {
       for (const k of [1, 2, 5]) {
         const p = await computePortalFlowParallel(r.graph, r.mightSee, workers(k), {});
         expect(same(p.portalVis, r.portalVis)).toBe(true);
-        expect(p.stats.steps).toBe(r.flowStats.steps);
+        expect(p.stats).toEqual(r.flowStats); // counters aggregate the same way
         expect(p.stats.truncated).toBe(false);
       }
     }
+  });
+
+  it("counts the flow's clip calls", () => {
+    const { flowStats: f } = compileLevel(SAMPLE_LEVELS[0].create());
+    expect(f.facetClips).toBeGreaterThanOrEqual(f.steps); // step 1 always runs, step 2 if 1 survives
+    expect(f.facetClips).toBeLessThanOrEqual(2 * f.steps);
+    expect(f.separatorClips).toBeGreaterThan(0);
   });
 
   it("finds independent sources to run concurrently", async () => {

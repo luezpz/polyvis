@@ -24,7 +24,7 @@
 import type { Dim, Geometry } from "../geometry";
 import type { PortalGraph } from "../portals";
 import type { BitSet } from "./bitset";
-import { DEFAULT_PORTAL_FLOW_OPTIONS, type PortalFlowOptions, type PortalFlowResult, type SourceFlow, flowFromSource, portalFlowOrder } from "./portalFlow";
+import { DEFAULT_PORTAL_FLOW_OPTIONS, EMPTY_FLOW_STATS, type PortalFlowOptions, type PortalFlowResult, type SourceFlow, addSourceStats, flowFromSource, portalFlowOrder } from "./portalFlow";
 
 /** A finished portal vis row, sent to workers to prune later sources. */
 export interface FlowRow {
@@ -71,7 +71,7 @@ export function createFlowSession<D extends Dim>(geometry: Geometry<D>, graph: P
       for (const id of sources) {
         // A batch's sources never depend on each other (all were ready together), so no rows are shared within it.
         const r = left > 0 ? flowFromSource(geometry, graph, mightSee, known, id, clipSource, left, onChain, rank)
-          : { sourceId: id, vis: mightSee[id].clone(), steps: 0, maxChainDepth: 0, truncated: true };
+          : { sourceId: id, vis: mightSee[id].clone(), steps: 0, maxChainDepth: 0, truncated: true, facetClips: 0, separatorClips: 0 };
         left -= r.steps;
         out.push(r);
       }
@@ -166,21 +166,19 @@ export async function computePortalFlowParallel<D extends Dim>(graph: PortalGrap
   const sent = workers.map(() => new Uint8Array(n)); // sent[w][j]: worker w has row j
   const ready = rankHeap(rank);
   for (let i = 0; i < n; i++) if (pending[i] === 0) ready.push(i);
-  let steps = 0;
-  let maxChainDepth = 0;
+  let stats = EMPTY_FLOW_STATS;
   let truncated = false;
   let finished = 0;
   let maxReady = 0, readySum = 0, dispatches = 0;
 
   await Promise.all(workers.map((w) => w.begin(graph, mightSee, opts.clipSource, rank)));
-  if (n === 0) return { portalVis, stats: { steps, maxChainDepth, truncated }, parallel: { maxReady, meanReady: 0 } };
+  if (n === 0) return { portalVis, stats, parallel: { maxReady, meanReady: 0 } };
 
   const complete = (r: SourceFlow): void => {
     portalVis[r.sourceId] = r.vis;
     finished++;
-    steps += r.steps;
-    maxChainDepth = Math.max(maxChainDepth, r.maxChainDepth);
-    if (r.truncated || (opts.maxSteps > 0 && steps > opts.maxSteps)) truncated = true;
+    stats = addSourceStats(stats, r);
+    if (stats.truncated || (opts.maxSteps > 0 && stats.steps > opts.maxSteps)) truncated = true;
     for (const k of dependents[r.sourceId]) if (--pending[k] === 0) ready.push(k);
   };
 
@@ -200,7 +198,7 @@ export async function computePortalFlowParallel<D extends Dim>(graph: PortalGrap
         while (batch.length < take && ready.size) batch.push(ready.pop());
         if (truncated) {
           // Out of budget: fall back to base vis without a round trip.
-          for (const id of batch) complete({ sourceId: id, vis: mightSee[id].clone(), steps: 0, maxChainDepth: 0, truncated: true });
+          for (const id of batch) complete({ sourceId: id, vis: mightSee[id].clone(), steps: 0, maxChainDepth: 0, truncated: true, facetClips: 0, separatorClips: 0 });
           idle.push(wi);
           continue;
         }
@@ -208,7 +206,7 @@ export async function computePortalFlowParallel<D extends Dim>(graph: PortalGrap
         const has = sent[wi];
         const known: FlowRow[] = [];
         for (const id of batch) collectDeps(id, has, known);
-        const budget = opts.maxSteps > 0 ? opts.maxSteps - steps : Infinity;
+        const budget = opts.maxSteps > 0 ? opts.maxSteps - stats.steps : Infinity;
         workers[wi].flow(known, batch, budget).then((results) => {
           for (const r of results) complete(r);
           idle.push(wi);
@@ -239,5 +237,5 @@ export async function computePortalFlowParallel<D extends Dim>(graph: PortalGrap
     pump();
   });
 
-  return { portalVis, stats: { steps, maxChainDepth, truncated }, parallel: { maxReady, meanReady: dispatches ? readySum / dispatches : 0 } };
+  return { portalVis, stats: { ...stats, truncated }, parallel: { maxReady, meanReady: dispatches ? readySum / dispatches : 0 } };
 }

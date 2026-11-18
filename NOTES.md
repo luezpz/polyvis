@@ -53,10 +53,15 @@ only decisions, gotchas and open items. The 2D/3D merge (former PLAN.md / PROGRE
   ignored on rooms: a detail room would remove empty space. TODO: export `detailWalls` with
   the leaves each face touches, so a game can PVS-cull them.
 
+- Optimization work follows `docs/OPTIMIZATION-PLAN.md`; phase 0 (bench + flow counters) done,
+  baseline table there. Bench: `npm run bench [-- --all | --only <s> | --obj <file>]`; it runs TS
+  through `vite.runnerImport` (no `@types/node`: keep Node APIs in `scripts/bench.mjs`).
+
 ## Gotchas
 - Git history of the source repos (`polyvis2d` cdac3e9, `polyvis3d` 2de2526) was not carried over.
 
 ## Open TODOs
+- 3D Oblique lattice truncates at the 20 M `maxSteps` budget (bench, single-threaded).
 - Browser smoke test never done by an agent: `/2d.html` worker compile, select tool
   (click-to-cycle, edge push/pull), surfaces layer; `/3d.html` panel after the shared-UI refactor.
 - Parallel flow and parallel BSP never run in a browser by an agent: confirm nested workers

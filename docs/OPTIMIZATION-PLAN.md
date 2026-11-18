@@ -16,6 +16,52 @@ bench shows a win, then flip the default.
 - Add counters to `PortalFlowStats`: `separatorClips`, `classifyCalls` (cheap increments).
 - Output: baseline table committed to this file.
 
+**Status: done (2026-11-18).** `npm run bench` (`scripts/bench.mjs` → `scripts/bench.ts`, via Vite's
+`runnerImport`); flags `--all` (adds edge cases + 3D Oblique lattice), `--only <substr>`,
+`--obj <file>` (no large OBJ is in the repo; pass one). Counters added: `facetClips`
+(steps 1–2) and `separatorClips` (steps 3–4) in `PortalFlowStats`. `classifyCalls` was dropped:
+the flow never classifies, and base vis does at most 2 per ordered pair (≈ 2n², n = portals).
+
+Baseline (single-threaded Node 26, one run, `--all`; edge cases with no portals omitted):
+
+| level | portals | base vis ms | Σ mightSee | flow ms | steps | facet clips | separator clips | Σ portalVis | Σ pvs |
+|---|---|---|---|---|---|---|---|---|---|
+| 2d/Grid city 8×8 | 1504 | 545 | 408058 | 403 | 84859 | 169718 | 154684 | 76596 | 43720 |
+| 2d/Maze 16×16 | 3316 | 2671 | 80250 | 262 | 52424 | 104848 | 87856 | 46036 | 33839 |
+| 2d/Pillar forest | 2684 | 1610 | 1717614 | 9974 | 2085171 | 4170342 | 3640971 | 691076 | 359021 |
+| 2d/Serpentine | 152 | 7 | 514 | 1 | 406 | 812 | 440 | 334 | 563 |
+| 2d/Comb | 160 | 6 | 5560 | 20 | 5560 | 11120 | 10564 | 5560 | 5801 |
+| 2d/Slit wall | 120 | 4 | 2662 | 12 | 2578 | 5156 | 4680 | 2138 | 1911 |
+| 2d/Oblique lattice | 1588 | 667 | 583538 | 3830 | 888221 | 1775612 | 1406154 | 205746 | 74959 |
+| 2d/Overlap pile | 88 | 2 | 1819 | 9 | 2399 | 4796 | 3864 | 1768 | 624 |
+| 2d/Islands | 16 | 0 | 40 | 0 | 40 | 80 | 48 | 40 | 63 |
+| 2d/Round room | 128 | 4 | 1466 | 4 | 1303 | 2606 | 2041 | 1272 | 593 |
+| 2d/Needle | 6 | 0 | 6 | 0 | 6 | 12 | 4 | 6 | 16 |
+| 2d/Far from origin | 12 | 0 | 26 | 0 | 26 | 52 | 24 | 26 | 45 |
+| 3d/Grid city 6×6 | 1886 | 1211 | 444235 | 858 | 147259 | 294518 | 270737 | 125972 | 49998 |
+| 3d/Maze 10×10 | 396 | 44 | 4566 | 12 | 2288 | 4576 | 3544 | 2088 | 2683 |
+| 3d/Tower | 536 | 89 | 11421 | 70 | 13324 | 26641 | 22506 | 10440 | 4647 |
+| 3d/Pillar forest | 1120 | 407 | 296424 | 2919 | 500438 | 1000876 | 862433 | 168552 | 76099 |
+| 3d/Serpentine | 104 | 3 | 346 | 1 | 274 | 548 | 296 | 226 | 383 |
+| 3d/Comb | 120 | 4 | 3120 | 14 | 3120 | 6240 | 5824 | 3120 | 3301 |
+| 3d/Vent grille | 496 | 72 | 51768 | 193 | 50410 | 100820 | 83166 | 27776 | 12480 |
+| 3d/Oblique lattice | 1742 | 1134 | 856051 | 117809 | 20000001 (trunc) | 39982702 | 28695056 | 761912 | 69876 |
+| 3d/Edge & corner kiss | 2 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 6 |
+| 3d/Overlap pile | 540 | 88 | 70416 | 1084 | 187356 | 374352 | 299017 | 67980 | 7984 |
+| 3d/Islands | 96 | 3 | 1848 | 6 | 1856 | 3712 | 3176 | 1848 | 673 |
+| 3d/Round room | 96 | 3 | 839 | 2 | 768 | 1536 | 1124 | 744 | 369 |
+| 3d/Needle | 12 | 0 | 26 | 0 | 26 | 52 | 24 | 26 | 36 |
+| 3d/Far from origin | 32 | 0 | 150 | 0 | 150 | 300 | 192 | 150 | 139 |
+
+Observations:
+- facet clips ≈ 2 × steps: step 1 (source behind G) almost never rejects, so 1a's sphere test
+  and 1g's early reject should target steps 2–3, not 1.
+- 3D Oblique lattice **hits `maxSteps` (20 M)** after ~118 s and falls back to base vis for the
+  remaining sources: the flow is truncated there today, not merely slow.
+- Base vis beats flow on sparse levels (2D Maze 16×16: 2.7 s vs 0.26 s; 3D Grid city: 1.2 s vs
+  0.9 s): its O(n²) pair test is the target of 1a there.
+- Flow dominates on open levels (Pillar forest, Oblique lattice): 1b / 1d / 2a.
+
 ## Phase 1: cheap hot-loop wins (Q2 / q3map2)
 
 1a. **Bounding-sphere reject** (Q2 `portal->origin/radius`).

@@ -55,6 +55,24 @@ export interface PortalFlowStats {
   readonly maxChainDepth: number;
   /** True if {@link PortalFlowOptions.maxSteps} was hit. */
   readonly truncated: boolean;
+  /** `clipFacet` calls (steps 1 and 2), for the bench. */
+  readonly facetClips: number;
+  /** `clipToSeparators` calls (steps 3 and 4), for the bench. */
+  readonly separatorClips: number;
+}
+
+/** Stats of an empty run, to accumulate {@link SourceFlow} results into. */
+export const EMPTY_FLOW_STATS: PortalFlowStats = Object.freeze({ steps: 0, maxChainDepth: 0, truncated: false, facetClips: 0, separatorClips: 0 });
+
+/** Adds one source's counters to `acc` (truncation and depth combine by or / max). */
+export function addSourceStats(acc: PortalFlowStats, r: SourceFlow): PortalFlowStats {
+  return {
+    steps: acc.steps + r.steps,
+    maxChainDepth: Math.max(acc.maxChainDepth, r.maxChainDepth),
+    truncated: acc.truncated || r.truncated,
+    facetClips: acc.facetClips + r.facetClips,
+    separatorClips: acc.separatorClips + r.separatorClips,
+  };
 }
 
 export interface PortalFlowResult {
@@ -72,6 +90,8 @@ export interface SourceFlow {
   readonly maxChainDepth: number;
   /** True if the step budget ran out during this source. */
   readonly truncated: boolean;
+  readonly facetClips: number;
+  readonly separatorClips: number;
 }
 
 /**
@@ -103,6 +123,8 @@ export function flowFromSource<D extends Dim>(geometry: Geometry<D>, graph: Port
   let steps = 0;
   let maxChainDepth = 0;
   let truncated = false;
+  let facetClips = 0;
+  let separatorClips = 0;
 
   const recurse = (leaf: number, source: Facet<D>, pass: Facet<D> | null, might: BitSet, depth: number): void => {
     if (depth > maxChainDepth) maxChainDepth = depth;
@@ -122,18 +144,22 @@ export function flowFromSource<D extends Dim>(geometry: Geometry<D>, graph: Port
       }
 
       // 1. Sight lines leave the source forward through G: keep the part of the source behind G.
+      facetClips++;
       let src = clipFacet(source, flipPlane(gen.plane));
       if (!src) continue;
       // 2. G must be in front of the original source portal.
+      facetClips++;
       let g = clipFacet(gen.winding, sourcePlane);
       if (!g) continue;
 
       if (pass) {
         // 3. Clip G to the antipenumbra of (source, pass).
+        separatorClips++;
         g = clipToSeparators(src, pass, g);
         if (!g) continue;
         // 4. Clip the source to the reverse antipenumbra of (G, pass).
         if (clipSource) {
+          separatorClips++;
           src = clipToSeparators(g, pass, src);
           if (!src) continue;
         }
@@ -153,7 +179,7 @@ export function flowFromSource<D extends Dim>(geometry: Geometry<D>, graph: Port
   onChain.fill(0);
 
   // If we were cut short, fall back to the conservative estimate for this portal.
-  return { sourceId, vis: truncated ? mightSee[sourceId].clone() : vis, steps, maxChainDepth, truncated };
+  return { sourceId, vis: truncated ? mightSee[sourceId].clone() : vis, steps, maxChainDepth, truncated, facetClips, separatorClips };
 }
 
 /** Single-threaded portal flow over all source portals, in {@link portalFlowOrder}. */
@@ -162,22 +188,18 @@ export function computePortalFlow<D extends Dim>(geometry: Geometry<D>, graph: P
   const n = graph.portals.length;
   const portalVis: BitSet[] = new Array(n);
   const onChain = new Uint8Array(graph.leafCount);
-  let steps = 0;
-  let maxChainDepth = 0;
-  let truncated = false;
+  let stats = EMPTY_FLOW_STATS;
 
   for (const sourceId of portalFlowOrder(mightSee)) {
-    if (truncated) {
+    if (stats.truncated) {
       portalVis[sourceId] = mightSee[sourceId].clone();
       continue;
     }
-    const budget = opts.maxSteps > 0 ? opts.maxSteps - steps : Infinity;
+    const budget = opts.maxSteps > 0 ? opts.maxSteps - stats.steps : Infinity;
     const r = flowFromSource(geometry, graph, mightSee, portalVis, sourceId, opts.clipSource, budget, onChain);
     portalVis[sourceId] = r.vis;
-    steps += r.steps;
-    maxChainDepth = Math.max(maxChainDepth, r.maxChainDepth);
-    truncated = r.truncated;
+    stats = addSourceStats(stats, r);
   }
 
-  return { portalVis, stats: { steps, maxChainDepth, truncated } };
+  return { portalVis, stats };
 }

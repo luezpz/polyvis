@@ -22,6 +22,7 @@ npm run test:2d     # tests/d2 + tests/shared
 npm run test:3d     # tests/d3 + tests/shared (slow: ~15 s)
 npm run typecheck   # tsc --noEmit (must pass)
 npm run build       # typecheck + bundle all three pages into dist/
+npm run bench       # per-level vis timings/counters table (docs/OPTIMIZATION-PLAN.md)
 ```
 
 ## Architecture map
