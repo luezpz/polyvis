@@ -69,6 +69,12 @@ Observations:
     `signedDistance(pi.plane, cj) < -rj` → reject; `> rj` → Front without classifying.
   - Same quick test before each `clipFacet` in the flow (whole winding on one side).
   - Needs: `Geometry.facetCenterRadius` (or compute from `facetPoints`), contract test.
+  **Status: base-vis half done (2026-11-18), on by default (exact).** `portalSpheres` +
+  sphere branch in `portalMightSeePortal` (`computeBaseVis(g, graph, useSpheres = true)`); no new
+  `Geometry` op (computed via `facetPoints`/`coords`/`vecAt`). Same Σ mightSee; base vis ms:
+  2D Maze 16×16 2455 → 1113, 2D Pillar forest 1830 → 717, 3D Grid city 1077 → 676, 3D Pillar
+  forest 357 → 170. Flow half (sphere test before `clipFacet`) not done: step 1 almost never
+  rejects (phase 0), so gain is doubtful; measure first.
 1b. **Separator caching** (q3map2 `stack->seperators`).
   - Separators of (source, pass) depend only on the frame, not the generator. Build once per
     recursion frame, then clip each generator against the list.

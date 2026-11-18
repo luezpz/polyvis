@@ -17,7 +17,8 @@ export {
 export const portalMightSeePortal = (graph: PortalGraph, i: number, j: number): boolean => shared.portalMightSeePortal(geometry3, graph, i, j);
 
 /** The "might see" set of every portal. */
-export const computeBaseVis = (graph: PortalGraph): shared.BitSet[] => shared.computeBaseVis(geometry3, graph);
+/** `useSpheres`: bounding-sphere pre-test (same result, faster). */
+export const computeBaseVis = (graph: PortalGraph, useSpheres = true): shared.BitSet[] => shared.computeBaseVis(geometry3, graph, useSpheres);
 
 /** Portal flow: the portals each portal can really see through (conservative). */
 export const computePortalFlow = (graph: PortalGraph, mightSee: readonly shared.BitSet[], options: Partial<shared.PortalFlowOptions> = {}): shared.PortalFlowResult =>

@@ -216,3 +216,14 @@ describe("export", () => {
     });
   });
 });
+
+describe("base vis sphere pre-test (1a)", () => {
+  it("gives the same mightSee as plain classification", async () => {
+    const { computeBaseVis } = await import("../../src/d3/core/vis/vis");
+    for (const level of [...SAMPLE_LEVELS.map((s) => s.create()), randomLevel(7, 8), randomLevel(21, 8)]) {
+      const { graph } = compileLevel(level);
+      const fast = computeBaseVis(graph, true), plain = computeBaseVis(graph, false);
+      for (let i = 0; i < plain.length; i++) expect(fast[i].equals(plain[i])).toBe(true);
+    }
+  });
+});
