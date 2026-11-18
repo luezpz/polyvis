@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { SAMPLE_LEVELS, compileLevel, compileLevelAsync } from "../../src/d2/core";
 import { geometry2 } from "../../src/d2/core/geometry";
-import { BitSet, computePassages, passageCosts, packPortalGraph, unpackPortalGraph, computePassagesParallel, computePortalFlow, inProcessPassageWorker, passageChunks } from "../../src/shared/core";
+import { BitSet, computePassages, passageCosts, packPortalGraph, unpackPortalGraph, computePassagesParallel, computePortalFlow, inProcessRowWorker, costChunks } from "../../src/shared/core";
 import { randomLevel } from "./helpers";
 
 const levels = () => [...SAMPLE_LEVELS.map((s) => s.create()), randomLevel(7, 8), randomLevel(21, 8)];
-const workers = (k: number) => Array.from({ length: k }, () => inProcessPassageWorker(geometry2));
+const workers = (k: number) => Array.from({ length: k }, () => inProcessRowWorker(geometry2));
 
 describe("parallel passage table", () => {
   it("equals the single-threaded table for any worker count", async () => {
@@ -18,7 +18,7 @@ describe("parallel passage table", () => {
 
   it("small tables skip the workers; the default threshold still gives the same table", async () => {
     let begun = 0;
-    const counting = workers(4).map((w) => ({ ...w, begin: (g: Float64Array, m: Uint32Array) => { begun++; return w.begin(g, m); } }));
+    const counting = workers(4).map((w) => ({ ...w, begin: (...a: Parameters<typeof w.begin>) => { begun++; return w.begin(...a); } }));
     const { graph, mightSee } = compileLevel(SAMPLE_LEVELS[0].create());
     expect(await computePassagesParallel(geometry2, graph, mightSee, counting)).toEqual(computePassages(geometry2, graph, mightSee));
     expect(begun).toBe(0);
@@ -40,7 +40,7 @@ describe("parallel passage table", () => {
     const { graph, mightSee } = compileLevel(randomLevel(21, 8));
     const cost = passageCosts(geometry2, graph, mightSee);
     for (const count of [1, 3, 16, 10_000]) {
-      const start = passageChunks(cost, count);
+      const start = costChunks(cost, count);
       expect(start[0]).toBe(0);
       expect(start[start.length - 1]).toBe(graph.portals.length);
       for (let i = 1; i < start.length; i++) expect(start[i]).toBeGreaterThan(start[i - 1]);
@@ -51,8 +51,10 @@ describe("parallel passage table", () => {
   it("compileLevelAsync with a passage runner gives the same result as compileLevel", async () => {
     for (const level of levels()) {
       const sync = compileLevel(level, { baseVis: "passages" });
-      const async_ = await compileLevelAsync(level, { baseVis: "passages" }, async (g, m, o) => computePortalFlow(geometry2, g, m, o), undefined,
-        (g, m) => computePassagesParallel(geometry2, g, m, workers(3), 0));
+      const async_ = await compileLevelAsync(level, { baseVis: "passages" }, {
+        flow: async (g, m, o) => computePortalFlow(geometry2, g, m, o),
+        passages: (g, m) => computePassagesParallel(geometry2, g, m, workers(3), 0),
+      });
       expect(async_.pvs).toEqual(sync.pvs);
       expect(async_.portalVis).toEqual(sync.portalVis);
       expect(async_.flowStats).toEqual(sync.flowStats);

@@ -5,6 +5,7 @@
 
 import { type Dim, type FlowRunner, type FlowWorker, type Geometry, computePortalFlow, computePortalFlowParallel } from "../../core";
 import { type FlowResponse, toBitSet } from "./flowProtocol";
+import { poolRunner } from "./poolRunner";
 import type { PoolCall, WorkerPool } from "./workerPool";
 
 /** Below this many portals, worker start-up and cloning cost more than they save. */
@@ -25,18 +26,12 @@ function poolFlowWorker(call: PoolCall): FlowWorker {
 
 /** A {@link FlowRunner} on `pool`; `geometry` is for the single-threaded path, also used if the pool fails. */
 export function createParallelFlowRunner<D extends Dim>(geometry: Geometry<D>, pool: WorkerPool): FlowRunner<D> {
-  return async (graph, mightSee, options) => {
-    const calls = graph.portals.length >= MIN_PARALLEL_PORTALS ? pool.workers() : null;
-    if (!calls) return computePortalFlow(geometry, graph, mightSee, options);
-    try {
+  return poolRunner(pool, "portal flow", (graph) => graph.portals.length >= MIN_PARALLEL_PORTALS,
+    (graph, mightSee, options) => computePortalFlow(geometry, graph, mightSee, options),
+    async (calls, graph, mightSee, options) => {
       const result = await computePortalFlowParallel(graph, mightSee, calls.map(poolFlowWorker), options);
       // How much the dependency graph let run at once: compare with the thread count.
       console.debug(`portal flow: ${calls.length} threads, ready sources max ${result.parallel.maxReady}, mean ${result.parallel.meanReady.toFixed(1)}`);
       return result;
-    } catch (e) {
-      console.warn("Parallel portal flow failed, using one thread", e);
-      pool.markBroken();
-      return computePortalFlow(geometry, graph, mightSee, options);
-    }
-  };
+    });
 }

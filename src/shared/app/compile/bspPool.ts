@@ -4,6 +4,7 @@
  */
 
 import { type BspRunner, type BspWorker, type Dim, type Geometry, type PackedSubtree, type SplitChoice, buildBsp, buildBspParallel } from "../../core";
+import { poolRunner } from "./poolRunner";
 import type { PoolCall, WorkerPool } from "./workerPool";
 
 /** Below this many walls, worker round trips and cloning cost more than they save. */
@@ -22,15 +23,7 @@ function poolBspWorker<D extends Dim>(call: PoolCall): BspWorker<D> {
 
 /** A {@link BspRunner} on `pool`; `geometry` is for the single-threaded path, also used if the pool fails. */
 export function createParallelBspRunner<D extends Dim>(geometry: Geometry<D>, pool: WorkerPool): BspRunner<D> {
-  return async (walls, options) => {
-    const calls = walls.length >= MIN_PARALLEL_WALLS ? pool.workers() : null;
-    if (!calls) return buildBsp(geometry, walls, options);
-    try {
-      return await buildBspParallel(geometry, walls, options, calls.slice(0, MAX_BSP_THREADS).map((c) => poolBspWorker<D>(c)));
-    } catch (e) {
-      console.warn("Parallel BSP build failed, using one thread", e);
-      pool.markBroken();
-      return buildBsp(geometry, walls, options);
-    }
-  };
+  return poolRunner(pool, "BSP build", (walls) => walls.length >= MIN_PARALLEL_WALLS,
+    (walls, options) => buildBsp(geometry, walls, options),
+    (calls, walls, options) => buildBspParallel(geometry, walls, options, calls.slice(0, MAX_BSP_THREADS).map((c) => poolBspWorker<D>(c))));
 }

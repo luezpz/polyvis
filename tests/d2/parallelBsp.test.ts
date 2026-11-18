@@ -34,8 +34,9 @@ describe("parallel BSP build", () => {
     const pool = workers(4);
     for (const level of SAMPLE_LEVELS.map((s) => s.create())) {
       const sync = compileLevel(level);
-      const r = await compileLevelAsync(level, {}, async (graph, mightSee, opts) => computePortalFlow(graph, mightSee, opts),
-        (w, opts) => buildBspParallel(geometry2, w, opts, pool));
+      const r = await compileLevelAsync(level, {}, {
+        flow: async (graph, mightSee, opts) => computePortalFlow(graph, mightSee, opts),
+        bsp: (w, opts) => buildBspParallel(geometry2, w, opts, pool) });
       expect(r.tree).toEqual(sync.tree);
       expect(r.pvs.every((row, i) => row.equals(sync.pvs[i]))).toBe(true);
     }

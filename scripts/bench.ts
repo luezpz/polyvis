@@ -6,9 +6,9 @@
 
 import * as d2 from "../src/d2/core";
 import * as d3 from "../src/d3/core";
-import { type Dim2, geometry2 } from "../src/d2/core/geometry";
-import { type Dim3, geometry3 } from "../src/d3/core/geometry";
-import { type BitSet, type CompileOptions, type CompileResult, type Dim, type Geometry, type BaseVisRunner, type BaseVisWorker, type PassageRunner, type PassageWorker, computeBaseVisParallel, computePassagesParallel, computePortalFlow } from "../src/shared/core";
+import { geometry2 } from "../src/d2/core/geometry";
+import { geometry3 } from "../src/d3/core/geometry";
+import { type BitSet, type CompileOptions, type CompileResult, type Dim, type Geometry, type RowWorker, type StageRunners, computeBaseVisParallel, computePassagesParallel, computePortalFlow } from "../src/shared/core";
 
 /** One bench thread (see `bench.mjs`): sends a request, resolves with its response. */
 export type ThreadCall = (req: object) => Promise<{ words?: Uint32Array }>;
@@ -29,36 +29,35 @@ const total = (rows: readonly BitSet[]): number => rows.reduce((s, r) => s + r.c
 /** Wall-clock ms of `stage` in a result's timings (0 if absent). */
 const ms = (r: CompileResult<Dim>, stage: string): number => r.timings.find((t) => t.stage === stage)?.ms ?? 0;
 
-/** `threads` as {@link PassageWorker}s for dimension `dim`. */
-function threadWorkers(threads: readonly ThreadCall[], dim: 2 | 3): PassageWorker[] {
+/** `threads` as {@link RowWorker}s for dimension `dim`. */
+function rowWorkers(threads: readonly ThreadCall[], dim: 2 | 3): RowWorker[] {
   return threads.map((call) => ({
-    async begin(graph, mightSee) { await call({ type: "passage-begin", dim, graph, mightSee }); },
-    async rows(p0, p1) { return (await call({ type: "passage-rows", p0, p1 })).words!; },
+    async begin(job, graph, mightSee) { await call({ type: "rows-begin", dim, job, graph, mightSee }); },
+    async rows(p0, p1) { return (await call({ type: "rows", p0, p1 })).words!; },
   }));
 }
 
-/** `threads` as {@link BaseVisWorker}s for dimension `dim`. */
-function baseVisWorkers(threads: readonly ThreadCall[], dim: 2 | 3): BaseVisWorker[] {
-  return threads.map((call) => ({
-    async begin(graph) { await call({ type: "basevis-begin", dim, graph }); },
-    async rows(p0, p1) { return (await call({ type: "basevis-rows", p0, p1 })).words!; },
-  }));
-}
-
-/** Single-threaded flow as a `FlowRunner` (the bench times the passage build, not the parallel flow). */
+/** Single-threaded flow as a `FlowRunner` (the bench times the row stages, not the parallel flow). */
 const flowRunner = <D extends Dim>(g: Geometry<D>) => async (...a: Parameters<typeof computePortalFlow<D>> extends [unknown, ...infer R] ? R : never) => computePortalFlow(g, ...a);
+
+/** Runners of one dimension: single-threaded flow; base vis and passage table on `threads`. */
+function threadRunners<D extends Dim>(g: Geometry<D>, threads: readonly ThreadCall[]): StageRunners<D> {
+  const workers = rowWorkers(threads, g.dimension as 2 | 3);
+  return {
+    flow: flowRunner(g),
+    baseVis: (graph) => computeBaseVisParallel(g, graph, workers),
+    passages: (graph, mightSee) => computePassagesParallel(g, graph, mightSee, workers),
+  };
+}
 
 /**
  * Bench cases: every demo of both dimensions, plus an optional OBJ (`obj`: path and file text).
  * `threads` (non-null): base vis and passage tables are built on them through `compileLevelAsync`.
  */
 function cases(obj: { path: string; text: string } | null, opts: Partial<CompileOptions>, threads: readonly ThreadCall[] | null): Case[] {
-  const run2: PassageRunner<Dim2> | undefined = threads ? (g, m) => computePassagesParallel(geometry2, g, m, threadWorkers(threads, 2)) : undefined;
-  const run3: PassageRunner<Dim3> | undefined = threads ? (g, m) => computePassagesParallel(geometry3, g, m, threadWorkers(threads, 3)) : undefined;
-  const base2: BaseVisRunner<Dim2> | undefined = threads ? (g) => computeBaseVisParallel(geometry2, g, baseVisWorkers(threads, 2)) : undefined;
-  const base3: BaseVisRunner<Dim3> | undefined = threads ? (g) => computeBaseVisParallel(geometry3, g, baseVisWorkers(threads, 3)) : undefined;
-  const c2 = async (level: d2.Level) => (run2 ? d2.compileLevelAsync(level, opts, flowRunner(geometry2), undefined, run2, base2) : d2.compileLevel(level, opts)) as Promise<CompileResult<Dim>>;
-  const c3 = async (level: d3.Level) => (run3 ? d3.compileLevelAsync(level, opts, flowRunner(geometry3), undefined, run3, base3) : d3.compileLevel(level, opts)) as Promise<CompileResult<Dim>>;
+  const r2 = threads && threadRunners(geometry2, threads), r3 = threads && threadRunners(geometry3, threads);
+  const c2 = async (level: d2.Level) => (r2 ? d2.compileLevelAsync(level, opts, r2) : d2.compileLevel(level, opts)) as Promise<CompileResult<Dim>>;
+  const c3 = async (level: d3.Level) => (r3 ? d3.compileLevelAsync(level, opts, r3) : d3.compileLevel(level, opts)) as Promise<CompileResult<Dim>>;
   const out: Case[] = [
     ...d2.DEMO_LEVELS.map((s) => ({ name: `2d/${s.name}`, group: s.group, compile: () => c2(s.create()) })),
     ...d3.DEMO_LEVELS.map((s) => ({ name: `3d/${s.name}`, group: s.group, compile: () => c3(s.create()) })),

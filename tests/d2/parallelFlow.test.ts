@@ -51,7 +51,7 @@ describe("parallel portal flow (dependency scheduling)", () => {
     for (const level of levels()) {
       const sync = compileLevel(level);
       const pool = workers(3);
-      const r = await compileLevelAsync(level, {}, (graph, mightSee, opts) => computePortalFlowParallel(graph, mightSee, pool, opts));
+      const r = await compileLevelAsync(level, {}, { flow: (graph, mightSee, opts) => computePortalFlowParallel(graph, mightSee, pool, opts) });
       expect(same(r.pvs, sync.pvs)).toBe(true);
       expect(r.timings.some((t) => t.stage === "portal flow")).toBe(true);
     }

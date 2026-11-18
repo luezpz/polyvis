@@ -2,18 +2,12 @@
 
 import { type Level, compileLevelAsync } from "../../core";
 import { geometry2 } from "../../core/geometry";
-import { createParallelBaseVisRunner } from "../../../shared/app/compile/baseVisPool";
-import { createParallelBspRunner } from "../../../shared/app/compile/bspPool";
-import { createParallelFlowRunner } from "../../../shared/app/compile/flowPool";
-import { createParallelPassageRunner } from "../../../shared/app/compile/passagePool";
+import { createPoolRunners } from "../../../shared/app/compile/poolRunners";
 import { serveCompiler } from "../../../shared/app/compile/serveCompiler";
 import { WorkerPool } from "../../../shared/app/compile/workerPool";
 
 // The URL must be a literal here so Vite bundles the nested worker.
 const pool = new WorkerPool(() => new Worker(new URL("./poolWorker.ts", import.meta.url), { type: "module" }));
-const runFlow = createParallelFlowRunner(geometry2, pool);
-const runBsp = createParallelBspRunner(geometry2, pool);
-const runPassages = createParallelPassageRunner(geometry2, pool);
-const runBaseVis = createParallelBaseVisRunner(geometry2, pool);
+const runners = createPoolRunners(geometry2, pool);
 
-serveCompiler((level: Level, options) => compileLevelAsync(level, options, runFlow, runBsp, runPassages, runBaseVis));
+serveCompiler((level: Level, options) => compileLevelAsync(level, options, runners));

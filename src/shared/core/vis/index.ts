@@ -5,5 +5,6 @@ export * from "./portalFlow";
 export * from "./leafPvs";
 export * from "./pvsTable";
 export * from "./parallelFlow";
+export * from "./parallelRows";
 export * from "./parallelPassages";
 export * from "./parallelBaseVis";

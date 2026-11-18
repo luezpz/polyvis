@@ -94,11 +94,8 @@ export interface Compiler<D extends Dim, L> {
    * point for non-CSG input, which may leak. `timings` receives the stages.
    */
   compileWalls(walls: readonly Wall<D>[], options?: Partial<CompileOptions>, timings?: StageTiming[]): CompileResult<D>;
-  /**
-   * Like `compileLevel`, but the portal flow is delegated to `runFlow` and, if given, the BSP build
-   * to `runBsp`, the passage table to `runPassages` and base vis to `runBaseVis` (e.g. a worker pool).
-   */
-  compileLevelAsync(level: L, options: Partial<CompileOptions>, runFlow: FlowRunner<D>, runBsp?: BspRunner<D>, runPassages?: PassageRunner<D>, runBaseVis?: BaseVisRunner<D>): Promise<CompileResult<D>>;
+  /** Like `compileLevel`, but stages with a runner in `runners` are delegated to it (e.g. a worker pool). */
+  compileLevelAsync(level: L, options: Partial<CompileOptions>, runners: StageRunners<D>): Promise<CompileResult<D>>;
 }
 
 /** Runs the BSP stage with complete options; must return what `buildBsp` would. */
@@ -112,6 +109,14 @@ export type PassageRunner<D extends Dim> = (graph: PortalGraph<D>, mightSee: rea
 
 /** Computes base vis rows; must return what `computeBaseVis` would. */
 export type BaseVisRunner<D extends Dim> = (graph: PortalGraph<D>) => Promise<readonly BitSet[]>;
+
+/** Delegated stages of `compileLevelAsync`: the flow always, the others only if given (else run here). */
+export interface StageRunners<D extends Dim> {
+  readonly flow: FlowRunner<D>;
+  readonly bsp?: BspRunner<D>;
+  readonly baseVis?: BaseVisRunner<D>;
+  readonly passages?: PassageRunner<D>;
+}
 
 /** Binds the pipeline to one dimension. */
 export function createCompiler<D extends Dim, L>(config: CompilerConfig<D, L>): Compiler<D, L> {
@@ -177,27 +182,27 @@ export function createCompiler<D extends Dim, L>(config: CompilerConfig<D, L>): 
 
   const bspOptions = (opts: CompileOptions): BspBuildOptions => ({ ...config.bspDefaults, ...opts.bsp });
 
-  const compileLevelAsync = async (level: L, options: Partial<CompileOptions>, runFlow: FlowRunner<D>, runBsp?: BspRunner<D>, runPassages?: PassageRunner<D>, runBaseVis?: BaseVisRunner<D>): Promise<CompileResult<D>> => {
+  const compileLevelAsync = async (level: L, options: Partial<CompileOptions>, runners: StageRunners<D>): Promise<CompileResult<D>> => {
     const opts: CompileOptions = { ...DEFAULT_COMPILE_OPTIONS, ...options };
     const timings: StageTiming[] = [];
     const walls = timed(timings, "csg", () => config.levelWalls(level));
     const detailWalls = levelDetailWalls(level, timings);
     const tb = performance.now();
-    const bsp = runBsp ? await runBsp(walls, bspOptions(opts)) : buildBsp(g, walls, bspOptions(opts));
+    const bsp = runners.bsp ? await runners.bsp(walls, bspOptions(opts)) : buildBsp(g, walls, bspOptions(opts));
     timings.push({ stage: "bsp", ms: performance.now() - tb });
     const portals = throughPortals(walls, bsp, timings);
     const tv = performance.now();
-    const base = { ...portals, base: runBaseVis ? await runBaseVis(portals.graph) : computeBaseVis(g, portals.graph) };
+    const base = { ...portals, base: runners.baseVis ? await runners.baseVis(portals.graph) : computeBaseVis(g, portals.graph) };
     timings.push({ stage: "base vis", ms: performance.now() - tv });
     let passages: PassageTable | null = null;
     if (opts.baseVis === "passages") {
       const tp = performance.now();
-      passages = runPassages ? await runPassages(base.graph, base.base) : computePassages(g, base.graph, base.base);
+      passages = runners.passages ? await runners.passages(base.graph, base.base) : computePassages(g, base.graph, base.base);
       timings.push({ stage: "passage vis", ms: performance.now() - tp });
     }
     const pre = withPassages(base, passages, timings);
     const t0 = performance.now();
-    const flow = await runFlow(pre.graph, pre.mightSee, flowOptions(opts, pre));
+    const flow = await runners.flow(pre.graph, pre.mightSee, flowOptions(opts, pre));
     timings.push({ stage: "portal flow", ms: performance.now() - t0 });
     return { ...afterFlow(pre, flow, opts, timings), detailWalls };
   };

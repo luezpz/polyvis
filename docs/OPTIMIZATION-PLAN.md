@@ -175,7 +175,7 @@ Left open, bench-driven: 1a flow half, 1c, 1f, 1g. The 3D flow is now dominated 
   rows of p are independent (`createPassageRows(p0, p1)`), so portal ranges of equal estimated
   cost (`passageCosts`: (out-degree + 1) × (|mightSee| + 1), ×3 in 3D) go to workers, ~8 chunks
   per worker, handed out on demand; bit-identical table (tested for 1/2/5 workers). Editors: the
-  compile worker's pool (`shared/app/compile/passagePool.ts`, `runPassages` of
+  compile worker's pool (`shared/app/compile/rowPool.ts`, `runners.passages` of
   `compileLevelAsync`); bench: `--threads <n>` (Node `worker_threads`, `scripts/benchWorker.*`).
   Two fixes were needed before threads paid off:
   - **Packed inputs**: cloning the object graph cost ~10 ms *per worker*, serialized on the

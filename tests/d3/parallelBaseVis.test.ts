@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { SAMPLE_LEVELS, compileLevel, compileLevelAsync } from "../../src/d3/core";
 import { geometry3 } from "../../src/d3/core/geometry";
-import { computeBaseVis, computeBaseVisParallel, computePortalFlow, inProcessBaseVisWorker } from "../../src/shared/core";
+import { computeBaseVis, computeBaseVisParallel, computePortalFlow, inProcessRowWorker } from "../../src/shared/core";
 import { randomLevel } from "./helpers";
 
 const levels = () => [...SAMPLE_LEVELS.map((s) => s.create()), randomLevel(7, 8), randomLevel(21, 8)];
-const workers = (k: number) => Array.from({ length: k }, () => inProcessBaseVisWorker(geometry3));
+const workers = (k: number) => Array.from({ length: k }, () => inProcessRowWorker(geometry3));
 
 describe("parallel base vis", () => {
   it("equals the single-threaded rows for any worker count", async () => {
@@ -24,7 +24,7 @@ describe("parallel base vis", () => {
 
   it("small graphs skip the workers", async () => {
     let begun = 0;
-    const counting = workers(4).map((w) => ({ ...w, begin: (g: Float64Array) => { begun++; return w.begin(g); } }));
+    const counting = workers(4).map((w) => ({ ...w, begin: (...a: Parameters<typeof w.begin>) => { begun++; return w.begin(...a); } }));
     const { graph, mightSee } = compileLevel(SAMPLE_LEVELS[0].create());
     expect(await computeBaseVisParallel(geometry3, graph, counting)).toEqual(mightSee);
     expect(begun).toBe(0);
@@ -34,8 +34,10 @@ describe("parallel base vis", () => {
     for (const baseVis of ["planes", "passages"] as const) {
       for (const level of levels()) {
         const sync = compileLevel(level, { baseVis });
-        const async_ = await compileLevelAsync(level, { baseVis }, async (g, m, o) => computePortalFlow(geometry3, g, m, o), undefined, undefined,
-          (g) => computeBaseVisParallel(geometry3, g, workers(3), 0));
+        const async_ = await compileLevelAsync(level, { baseVis }, {
+          flow: async (g, m, o) => computePortalFlow(geometry3, g, m, o),
+          baseVis: (g) => computeBaseVisParallel(geometry3, g, workers(3), 0),
+        });
         expect(async_.mightSee).toEqual(sync.mightSee);
         expect(async_.pvs).toEqual(sync.pvs);
         expect(async_.flowStats).toEqual(sync.flowStats);

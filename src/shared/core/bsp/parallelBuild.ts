@@ -30,6 +30,7 @@
  */
 
 import type { Cell, Dim, Geometry } from "../geometry";
+import { workerQueue } from "../parallel";
 import type { Wall } from "../wall";
 import {
   type BspBuildOptions, type BspBuildResult, type Fragment, type Skeleton, type SplitChoice, type Subtree, type SubtreeTask,
@@ -175,20 +176,4 @@ export async function buildBspParallel<D extends Dim>(g: Geometry<D>, walls: rea
   pending.sort((a, b) => b.size - a.size);
   await Promise.all(pending.map((p) => run((w) => w.subtree(p.task)).then((packedTree) => { p.slot.tree = unpackSubtree(g, packedTree); })));
   return assembleTree(g, ctx, skeleton);
-}
-
-/** Runs each job on the next idle worker, queueing jobs while all are busy. */
-function workerQueue<W>(workers: readonly W[]): <T>(job: (w: W) => Promise<T>) => Promise<T> {
-  const idle = [...workers];
-  const waiting: ((w: W) => void)[] = [];
-  return async (job) => {
-    const w = idle.pop() ?? (await new Promise<W>((resolve) => waiting.push(resolve)));
-    try {
-      return await job(w);
-    } finally {
-      const next = waiting.shift();
-      if (next) next(w);
-      else idle.push(w);
-    }
-  };
 }

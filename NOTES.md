@@ -36,9 +36,12 @@ only decisions, gotchas and open items. The 2D/3D merge (former PLAN.md / PROGRE
   Measured with Node threads, 4271 walls (300-room `randomLevel`): 514 -> 335 ms with 4 threads,
   worse with 8+ (serial setup ~75 ms, top walk); so capped at 4 (`bspPool.ts`), used from 300
   walls. BSP is only ~1-2% of a big compile; base vis dominates there.
-- Parallel base vis (`shared/core/vis/parallelBaseVis.ts`, app `baseVisPool.ts`) is exact: rows
-  are independent (`createBaseVisRows`), equal-size portal ranges, 8 chunks per worker, packed
-  graph in, packed rows back. Threads = n² / `MIN_PAIRS_PER_THREAD` (250 k); under 200 portals,
+- Parallel base vis (`shared/core/vis/parallelBaseVis.ts`) is exact: rows are independent
+  (`createBaseVisRows`), equal-size portal ranges, 8 chunks per worker, packed graph in, packed
+  rows back. Base vis and the passage table share one worker protocol (`RowWorker`, `RowJob`,
+  `vis/parallelRows.ts`; app `rowPool.ts`/`rowProtocol.ts`); every app runner uses `poolRunner`
+  (size check, fallback, `markBroken`), every chunked stage `parallel/workerQueue`. New parallel
+  stages should reuse these rather than add a protocol and pool file each. Threads = n² / `MIN_PAIRS_PER_THREAD` (250 k); under 200 portals,
   one thread. Node threads (`npm run bench -- --threads n --repeat 4`), base vis ms 1 → 4 → 8
   threads: 2D Maze 16x16 983 → 359 → 290, 2D Grid city 238 → 75 → 69, 3D Grid city 636 → 262 →
   164, 3D Pillar forest 175 → 81 → 72; levels under ~550 portals unchanged (stay local).
@@ -68,7 +71,7 @@ only decisions, gotchas and open items. The 2D/3D merge (former PLAN.md / PROGRE
   mightSee, per-depth flow pruning) done as an option, default off (table build costs more than it
   saves on shallow levels; fixes the 3D Oblique lattice truncation). Gotcha: with passages the
   flow must order sources by the *base* rows (`orderBy`), else results and step counts drift.
-  The table builds on the worker pool (`passagePool.ts`, cost-based thread count) from packed
+  The table builds on the worker pool (`rowPool.ts`, cost-based thread count) from packed
   inputs (`packPortalGraph`, `BitSet.packRows`): object-graph clones cost ~10 ms per worker. No
   memory cap (dense: slots × portals bits). Any vis change must keep the `--all` non-timing columns identical
   unless it is meant to change results. Bench: `npm run bench [-- --all | --only <s> | --obj <file> | --passages | --threads <n> | --repeat <k>]`
