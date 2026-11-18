@@ -28,7 +28,7 @@
  * clipped away.
  */
 
-import type { Dim, Facet, Geometry } from "../geometry";
+import type { Dim, Facet, Geometry, Plane } from "../geometry";
 import type { PortalGraph } from "../portals";
 import { BitSet } from "./bitset";
 
@@ -41,11 +41,17 @@ export interface PortalFlowOptions {
    * set (still conservative). 0 disables the limit.
    */
   readonly maxSteps: number;
+  /**
+   * Phase 1b: build the separators of (source, pass) once per recursion frame and reuse them for
+   * every generator whose step 1 leaves the source unchanged. Exact (same result); off only for tests.
+   */
+  readonly cacheSeparators: boolean;
 }
 
 export const DEFAULT_PORTAL_FLOW_OPTIONS: PortalFlowOptions = Object.freeze({
   clipSource: true,
   maxSteps: 20_000_000,
+  cacheSeparators: true,
 });
 
 export interface PortalFlowStats {
@@ -111,10 +117,11 @@ export function portalFlowOrder(mightSee: readonly BitSet[]): number[] {
  * `onChain`: scratch, `graph.leafCount` zeros; left zeroed on return.
  * `rank`: position of each portal in the flow order, or null. When given, `known[j]` is only used if
  * `rank[j] < rank[sourceId]`, so the result is the single-threaded one even if `known` holds later rows.
+ * `cacheSeparators`: see {@link PortalFlowOptions.cacheSeparators}.
  */
-export function flowFromSource<D extends Dim>(geometry: Geometry<D>, graph: PortalGraph<D>, mightSee: readonly BitSet[], known: readonly (BitSet | undefined)[], sourceId: number, clipSource: boolean, budget: number, onChain: Uint8Array, rank: Int32Array | null = null): SourceFlow {
+export function flowFromSource<D extends Dim>(geometry: Geometry<D>, graph: PortalGraph<D>, mightSee: readonly BitSet[], known: readonly (BitSet | undefined)[], sourceId: number, clipSource: boolean, budget: number, onChain: Uint8Array, rank: Int32Array | null = null, cacheSeparators = true): SourceFlow {
   // Hot loop: bind the geometry operations once.
-  const { clipFacet, flipPlane, clipToSeparators } = geometry;
+  const { clipFacet, flipPlane, clipToSeparators, separators, clipFacetToPlanes } = geometry;
   const { portals, portalsFrom } = graph;
   const sourcePortal = portals[sourceId];
   const vis = new BitSet(portals.length);
@@ -134,6 +141,8 @@ export function flowFromSource<D extends Dim>(geometry: Geometry<D>, graph: Port
 
   const recurse = (leaf: number, source: Facet<D>, pass: Facet<D> | null, might: BitSet, depth: number): void => {
     if (depth > maxChainDepth) maxChainDepth = depth;
+    // Separators of this frame's (source, pass), built on first use; valid while step 1 keeps `source`.
+    let frameSeps: Plane<D>[] | null = null;
     for (const gid of portalsFrom[leaf]) {
       if (!might.has(gid)) continue;
       const gen = portals[gid];
@@ -162,7 +171,8 @@ export function flowFromSource<D extends Dim>(geometry: Geometry<D>, graph: Port
       if (pass) {
         // 3. Clip G to the antipenumbra of (source, pass).
         separatorClips++;
-        g = clipToSeparators(src, pass, g);
+        if (cacheSeparators && src === source) g = clipFacetToPlanes(g, frameSeps ??= separators(source, pass));
+        else g = clipToSeparators(src, pass, g);
         if (!g) continue;
         // 4. Clip the source to the reverse antipenumbra of (G, pass).
         if (clipSource) {
@@ -209,7 +219,7 @@ export function computePortalFlow<D extends Dim>(geometry: Geometry<D>, graph: P
       continue;
     }
     const budget = opts.maxSteps > 0 ? opts.maxSteps - stats.steps : Infinity;
-    const r = flowFromSource(geometry, graph, mightSee, portalVis, sourceId, opts.clipSource, budget, onChain);
+    const r = flowFromSource(geometry, graph, mightSee, portalVis, sourceId, opts.clipSource, budget, onChain, null, opts.cacheSeparators);
     portalVis[sourceId] = r.vis;
     stats = addSourceStats(stats, r);
   }

@@ -131,4 +131,12 @@ export interface Geometry<D extends Dim> {
    * Null if nothing is left.
    */
   clipToSeparators(from: Facet<D>, to: Facet<D>, target: Facet<D>): Facet<D> | null;
+  /**
+   * The separating planes of (`from`, `to`), in the order `clipToSeparators` visits them, so
+   * `clipFacetToPlanes(t, separators(f, p))` equals `clipToSeparators(f, p, t)` exactly. Lets the
+   * flow build them once per (source, pass) frame (phase 1b).
+   */
+  separators(from: Facet<D>, to: Facet<D>): Plane<D>[];
+  /** `facet` clipped to the front of every plane in order (`clipFacet` each); null once it vanishes. */
+  clipFacetToPlanes(facet: Facet<D>, planes: readonly Plane<D>[]): Facet<D> | null;
 }

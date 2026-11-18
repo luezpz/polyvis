@@ -12,7 +12,7 @@ import {
   polyhedronFromAabb, polyhedronVertices, sameOrientedPlane, signedDistance,
 } from "./math";
 import { packPolyhedron, packWinding, unpackPolyhedron, unpackWinding } from "./pack";
-import { clipToSeparators } from "./vis/antipenumbra";
+import { buildSeparators, clipToPlanes, clipToSeparators } from "./vis/antipenumbra";
 
 export type Dim3 = Dim<Vec3, Winding, ConvexPolyhedron>;
 
@@ -43,4 +43,6 @@ export const geometry3: Geometry<Dim3> = {
   unpackCell: unpackPolyhedron,
   wallTouchesCell: wallTouchesRegion,
   clipToSeparators,
+  separators: (from, to) => buildSeparators(from, to),
+  clipFacetToPlanes: clipToPlanes,
 };

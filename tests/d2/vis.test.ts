@@ -240,3 +240,25 @@ describe("base vis sphere pre-test (1a)", () => {
     }
   });
 });
+
+describe("separator caching (1b)", () => {
+  it("clipFacetToPlanes(separators) equals clipToSeparators", async () => {
+    const { geometry2: g } = await import("../../src/d2/core/geometry");
+    const { portals } = compileLevel(randomLevel(7, 8)).graph;
+    const r = rng(3);
+    for (let k = 0; k < 400; k++) {
+      const [a, b, c] = [0, 1, 2].map(() => portals[Math.floor(r() * portals.length)].winding);
+      expect(g.clipFacetToPlanes(c, g.separators(a, b))).toEqual(g.clipToSeparators(a, b, c));
+    }
+  });
+
+  it("gives the same portal flow as uncached", async () => {
+    const { computeBaseVis, computePortalFlow } = await import("../../src/d2/core/vis/vis");
+    for (const level of [...SAMPLE_LEVELS.map((s) => s.create()), randomLevel(21, 8)]) {
+      const { graph } = compileLevel(level);
+      const might = computeBaseVis(graph);
+      const on = computePortalFlow(graph, might), off = computePortalFlow(graph, might, { cacheSeparators: false });
+      for (let i = 0; i < might.length; i++) expect(on.portalVis[i].equals(off.portalVis[i])).toBe(true);
+    }
+  });
+});

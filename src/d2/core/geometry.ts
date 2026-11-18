@@ -12,7 +12,7 @@ import {
   polygonFromAabb, sameOrientedLine, signedDistance,
 } from "./math";
 import { packPolygon, packSegment, unpackPolygon, unpackSegment } from "./pack";
-import { clipToSeparators } from "./vis/antipenumbra";
+import { buildSeparators, clipToLines, clipToSeparators } from "./vis/antipenumbra";
 
 export type Dim2 = Dim<Vec2, Segment, ConvexPolygon>;
 
@@ -43,4 +43,6 @@ export const geometry2: Geometry<Dim2> = {
   unpackCell: unpackPolygon,
   wallTouchesCell: wallTouchesRegion,
   clipToSeparators,
+  separators: (from, to) => buildSeparators(from, to),
+  clipFacetToPlanes: clipToLines,
 };

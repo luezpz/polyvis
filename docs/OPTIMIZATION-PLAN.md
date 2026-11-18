@@ -82,6 +82,14 @@ Observations:
     kernels; contract test that cached == uncached.
   - Caveat: with `clipSource`, the source is re-clipped per generator; cache only for the
     unclipped-source case or key the cache on the source winding identity.
+  **Status: done (2026-11-18), on by default (exact).** `Geometry.separators` +
+  `clipFacetToPlanes` (both kernels, same plane order as `clipToSeparators`); `flowFromSource`
+  caches step 3's separators per frame and uses them whenever step 1 returns the source object
+  unchanged (`clipFacet` returns the same object when nothing is cut), so `clipSource` needs no
+  special case. Option `flow.cacheSeparators` (single-threaded API; workers always cache). Same
+  counters and Σ; flow ms vs 1d/1e: 2D Pillar forest 8628 → 7403, 2D Oblique lattice 3172 → 2447,
+  2D Grid city 361 → 288; 3D only ~2–8% (3D Pillar forest 2610 → 2571, Grid city 723 → 663): the
+  3D lazy separator walk already stops early, and step 4 (per generator, not cacheable) remains.
 1c. **Winding pooling** (Q1 stack windings): only if the bench shows GC time. Deferred.
 1d. **Allocation-free bitsets in the flow.** `might.and(...)` allocates a BitSet per step:
   use one preallocated row per recursion depth, and fuse `and` + `hasAnyNotIn(vis)` into one

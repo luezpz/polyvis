@@ -30,6 +30,13 @@ export function buildSeparators(from: Winding, to: Winding, eps = PLANE_EPSILON)
   return out;
 }
 
+/** Clips a winding to the front of every plane in order; null as soon as it vanishes. */
+export function clipToPlanes(w: Winding, planes: readonly Plane3[], eps = PLANE_EPSILON): Winding | null {
+  let cur: Winding | null = w;
+  for (const p of planes) if (!(cur = clipWinding(cur, p, eps))) return null;
+  return cur;
+}
+
 /**
  * Clips `target` to the front of every separator of (`from`, `to`), as the
  * separators are found, stopping as soon as nothing is left (Quake's
