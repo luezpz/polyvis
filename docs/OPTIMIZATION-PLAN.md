@@ -137,6 +137,27 @@ Left open, bench-driven: 1a flow half, 1c, 1f, 1g. The 3D flow is now dominated 
   - New module `vis/passages.ts`; pipeline option `basevis: "planes" | "passages"`.
   - Parallel: one task per p on the existing worker pool (rows are independent).
   - Tests: mightSee' ⊆ mightSee; final PVS identical (flow is exact either way).
+  **Status: done (2026-11-18) as option `baseVis: "passages"` (`computePassageVis`), default stays
+  `"planes"`: no win.** Single-threaded, no worker split yet. Correction to the plan: the final PVS
+  is *not* identical. The flow is order-dependent (sources sorted by |mightSee|, finished rows
+  prune later ones), so Σ portalVis moves both ways (2D Pillar forest 691076 → 690509, 2D Oblique
+  lattice 205746 → 206280); LOS tests pass either way. Bench (`npm run bench -- --passages`;
+  base vis ms includes the passage stage; planes → passages):
+
+  | level | Σ mightSee | base vis ms | flow ms | steps |
+  |---|---|---|---|---|
+  | 2d/Grid city 8×8 | 408058 → 333996 | 221 → 330 | 299 → 291 | 84859 → 81591 |
+  | 2d/Maze 16×16 | 80250 → 70731 | 975 → 1019 | 214 → 209 | 52424 → 51918 |
+  | 2d/Pillar forest | 1717614 → 1549352 | 701 → 1179 | 7240 → 7490 | 2085171 → 2192422 |
+  | 2d/Oblique lattice | 583538 → 514121 | 243 → 406 | 2428 → 2488 | 888221 → 904020 |
+  | 3d/Grid city 6×6 | 444235 → 387468 | 742 → 937 | 652 → 588 | 147259 → 135547 |
+  | 3d/Pillar forest | 296424 → 271308 | 181 → 514 | 2436 → 2473 | 500438 → 511612 |
+  | 3d/Vent grille | 51768 → 44892 | 44 → 88 | 170 → 175 | 50410 → 48728 |
+  | 3d/Oblique lattice | 856051 → 835274 | 476 → 1133 | ~91500 → 90494 (both trunc) | 20 M (trunc) |
+
+  Why: mightSee drops 8–28%, but the flow already prunes those portals at depth 2 for the cost
+  of one clip; the steps it wastes are at depth ≥ 3 in open levels, which 2a does not touch.
+  3D Oblique lattice still truncates. Next for steps: 2b (passage rows at every depth), or 3b/3e.
 2b. **Full passage rows in flow** (only if 2a leaves deep chains dominant).
   - Keep `canSee(p,t)` rows; flow at depth ≥ 2: `newMight &= canSee(pass, gen)`.
   - Memory: sparse / store only rows strictly tighter than mightSee[t]; pack in flowProtocol.
@@ -231,7 +252,7 @@ Doors must block vis when closed, without rebaking.
 | 0 bench (done) | S | required to judge everything |
 | 1a sphere reject (base vis done) | S | base vis 2–2.5× |
 | 1b separator cache (done) | M | flow −15–23% 2D, −2–8% 3D |
-| 2a passage mightSee | M | fewer steps on deep chains |
+| 2a passage mightSee (done, option, no win) | M | mightSee −8–28%, flow ≈ unchanged |
 | 3b clusters | M | big on large/OBJ levels |
 | 3c column sharing | S | narrower rows, lossless |
 | 1d allocation-free bitsets, 1e early-out (done) | S | flow −10–17% |

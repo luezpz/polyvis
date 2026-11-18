@@ -249,3 +249,37 @@ describe("separator caching (1b)", () => {
     }
   });
 });
+
+describe("passage vis (2a)", () => {
+  it("tightens mightSee to a subset that still covers the flow result", async () => {
+    const { computeBaseVis, computePassageVis, computePortalFlow } = await import("../../src/d3/core/vis/vis");
+    for (const level of [...SAMPLE_LEVELS.map((s) => s.create()), randomLevel(21, 8)]) {
+      const { graph } = compileLevel(level);
+      const base = computeBaseVis(graph), tight = computePassageVis(graph, base);
+      const flow = computePortalFlow(graph, base);
+      for (let i = 0; i < base.length; i++) {
+        expect(tight[i].hasAnyNotIn(base[i])).toBe(false);
+        expect(flow.portalVis[i].hasAnyNotIn(tight[i])).toBe(false);
+      }
+    }
+  });
+
+  it("is never stricter than true line of sight", () => {
+    const rand = rng(77);
+    let checked = 0;
+    for (const level of [...SAMPLE_LEVELS.map((s) => s.create()), randomLevel(7, 8), randomLevel(21, 8)]) {
+      const r = compileLevel(level, { baseVis: "passages" });
+      const leaves = emptyLeaves(r);
+      for (let k = 0; k < 300; k++) {
+        const a = leaves[Math.floor(rand() * leaves.length)];
+        const b = leaves[Math.floor(rand() * leaves.length)];
+        const p = randomPointInLeaf(r, a, rand);
+        const q = randomPointInLeaf(r, b, rand);
+        if (!p || !q || !lineOfSight(r.walls, p, q)) continue;
+        checked++;
+        expect(r.pvs[a].has(b), `leaf ${a} should see leaf ${b}`).toBe(true);
+      }
+    }
+    expect(checked).toBeGreaterThan(200);
+  });
+});

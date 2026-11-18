@@ -1,6 +1,6 @@
 // Launcher: runs scripts/bench.ts through Vite's module runner (TS + extensionless imports).
 // Default: Heavy + Worst case demos of both dimensions, minus 3D Oblique lattice (~110 s).
-// Usage: npm run bench -- [--all] [--only <substring>] [--obj <file.obj>]
+// Usage: npm run bench -- [--all] [--only <substring>] [--obj <file.obj>] [--passages]
 import { readFileSync } from "node:fs";
 import { runnerImport } from "vite";
 

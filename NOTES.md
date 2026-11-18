@@ -56,7 +56,8 @@ only decisions, gotchas and open items. The 2D/3D merge (former PLAN.md / PROGRE
 - Optimization work follows `docs/OPTIMIZATION-PLAN.md` (status, before/after tables there).
   Done: phase 0 (bench, flow counters), phase 1 (1a base-vis spheres, 1b separator cache, 1d/1e
   allocation-free flow rows + source early-out), all exact: bench counters identical to the
-  baseline. Next: phase 2a. Any vis change must keep the `--all` non-timing columns identical
+  baseline. Phase 2a (`baseVis: "passages"`) done as an option, default off (slower overall; see
+  plan). Gotcha: a smaller mightSee changes the flow source order, so the flow result changes too. Any vis change must keep the `--all` non-timing columns identical
   unless it is meant to change results. Bench: `npm run bench [-- --all | --only <s> | --obj <file>]`;
   it runs TS through `vite.runnerImport` (no `@types/node`: keep Node APIs in `scripts/bench.mjs`).
 
@@ -67,7 +68,7 @@ only decisions, gotchas and open items. The 2D/3D merge (former PLAN.md / PROGRE
 
 ## Open TODOs
 - 3D Oblique lattice truncates at the 20 M `maxSteps` budget (bench, single-threaded; ~92 s
-  after phase 1, was ~118 s). Phase 2a (fewer steps) is the fix candidate.
+  after phase 1, was ~118 s). Phase 2a did not fix it (mightSee −2%); candidates: 2b, 3b, 3e.
 - Browser smoke test never done by an agent: `/2d.html` worker compile, select tool
   (click-to-cycle, edge push/pull), surfaces layer; `/3d.html` panel after the shared-UI refactor.
 - Parallel flow and parallel BSP never run in a browser by an agent: confirm nested workers

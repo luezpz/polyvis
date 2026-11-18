@@ -18,6 +18,7 @@ import type { Dim, Geometry, Vec } from "../geometry";
 import { PLANE_EPSILON, Side } from "../math";
 import type { PortalGraph } from "../portals";
 import { BitSet } from "./bitset";
+import { floodPortals } from "./passages";
 
 /**
  * Bounding spheres of portal windings (Quake 2 `portal->origin/radius`), flat:
@@ -86,27 +87,13 @@ export function computeBaseVis<D extends Dim>(g: Geometry<D>, graph: PortalGraph
   const n = graph.portals.length;
   const spheres = useSpheres ? portalSpheres(g, graph) : null;
   const result: BitSet[] = [];
+  const visitedLeaf = new Uint8Array(graph.leafCount);
   for (let i = 0; i < n; i++) {
     const candidate = new BitSet(n);
     for (let j = 0; j < n; j++) if (portalMightSeePortal(g, graph, i, j, spheres)) candidate.set(j);
 
     // Flood through candidate portals starting from the leaf portal i leads into.
-    const reached = new BitSet(n);
-    const stack = [graph.portals[i].to];
-    const visitedLeaf = new Uint8Array(graph.leafCount);
-    visitedLeaf[graph.portals[i].to] = 1;
-    while (stack.length) {
-      const leaf = stack.pop()!;
-      for (const pid of graph.portalsFrom[leaf]) {
-        if (!candidate.has(pid) || reached.has(pid)) continue;
-        reached.set(pid);
-        const to = graph.portals[pid].to;
-        if (!visitedLeaf[to]) {
-          visitedLeaf[to] = 1;
-          stack.push(to);
-        }
-      }
-    }
+    const reached = floodPortals(graph, graph.portals[i].to, candidate, visitedLeaf);
     result.push(reached);
   }
   return result;

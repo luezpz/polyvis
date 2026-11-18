@@ -10,16 +10,24 @@
 import { type BspBuildOptions, type BspBuildResult, type BspStats, type BspTree, type LeafSurface, buildBsp, buildLeafSurfaces } from "./bsp";
 import type { Dim, Geometry } from "./geometry";
 import { type LeakReport, type PortalGraph, detectLeaks } from "./portals";
-import { type BitSet, type PortalFlowOptions, type PortalFlowResult, type PortalFlowStats, type PvsSymmetry, type PvsTable, buildPvsTable, computeBaseVis, computeLeafPvs, computePortalFlow } from "./vis";
+import { type BitSet, type PortalFlowOptions, type PortalFlowResult, type PortalFlowStats, type PvsSymmetry, type PvsTable, buildPvsTable, computeBaseVis, computePassageVis, computeLeafPvs, computePortalFlow } from "./vis";
 import type { Wall } from "./wall";
 
 export interface CompileOptions {
   readonly bsp: Partial<BspBuildOptions>;
   readonly flow: Partial<PortalFlowOptions>;
   readonly symmetry: PvsSymmetry;
+  /**
+   * Base vis estimate: `"planes"` (rules 1 + 2 and flood) or `"passages"` (phase 2a: planes, then
+   * tightened by the antipenumbra of each first portal, `computePassageVis`). Both conservative.
+   */
+  readonly baseVis: BaseVisMode;
 }
 
-export const DEFAULT_COMPILE_OPTIONS: CompileOptions = Object.freeze({ bsp: {}, flow: {}, symmetry: "none" });
+/** See {@link CompileOptions.baseVis}. */
+export type BaseVisMode = "planes" | "passages";
+
+export const DEFAULT_COMPILE_OPTIONS: CompileOptions = Object.freeze({ bsp: {}, flow: {}, symmetry: "none", baseVis: "planes" });
 
 export interface StageTiming {
   readonly stage: string;
@@ -100,12 +108,13 @@ export function createCompiler<D extends Dim, L>(config: CompilerConfig<D, L>): 
   const g = config.geometry;
 
   /** Stages up to base vis; `bsp` is the BSP stage's result (built by the caller, timed in `timings`). */
-  const beforeFlow = (walls: readonly Wall<D>[], bsp: BspBuildResult<D>, timings: StageTiming[]) => {
+  const beforeFlow = (walls: readonly Wall<D>[], bsp: BspBuildResult<D>, opts: CompileOptions, timings: StageTiming[]) => {
     const { tree, stats: bspStats } = bsp;
     const surfaces = timed(timings, "surfaces", () => buildLeafSurfaces(g, tree, walls));
     const graph = timed(timings, "portals", () => config.buildPortalGraph(tree));
     const leaks = timed(timings, "leaks", () => detectLeaks(g, tree, graph));
-    const mightSee = timed(timings, "base vis", () => computeBaseVis(g, graph));
+    const base = timed(timings, "base vis", () => computeBaseVis(g, graph));
+    const mightSee = opts.baseVis === "passages" ? timed(timings, "passage vis", () => computePassageVis(g, graph, base)) : base;
     return { walls, tree, bspStats, surfaces, graph, leaks, mightSee };
   };
 
@@ -121,7 +130,7 @@ export function createCompiler<D extends Dim, L>(config: CompilerConfig<D, L>): 
   const compileWalls = (walls: readonly Wall<D>[], options: Partial<CompileOptions> = {}, timings: StageTiming[] = []): CompileResult<D> => {
     const opts: CompileOptions = { ...DEFAULT_COMPILE_OPTIONS, ...options };
     const bsp = timed(timings, "bsp", () => buildBsp(g, walls, bspOptions(opts)));
-    const pre = beforeFlow(walls, bsp, timings);
+    const pre = beforeFlow(walls, bsp, opts, timings);
     const flow = timed(timings, "portal flow", () => computePortalFlow(g, pre.graph, pre.mightSee, opts.flow));
     return afterFlow(pre, flow, opts, timings);
   };
@@ -147,7 +156,7 @@ export function createCompiler<D extends Dim, L>(config: CompilerConfig<D, L>): 
     const tb = performance.now();
     const bsp = runBsp ? await runBsp(walls, bspOptions(opts)) : buildBsp(g, walls, bspOptions(opts));
     timings.push({ stage: "bsp", ms: performance.now() - tb });
-    const pre = beforeFlow(walls, bsp, timings);
+    const pre = beforeFlow(walls, bsp, opts, timings);
     const t0 = performance.now();
     const flow = await runFlow(pre.graph, pre.mightSee, opts.flow);
     timings.push({ stage: "portal flow", ms: performance.now() - t0 });
