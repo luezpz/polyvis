@@ -119,6 +119,20 @@ export class BitSet {
     return s;
   }
 
+  /** Rows of equal `size`, concatenated into one array (cheap to clone to a worker). See {@link unpackRows}. */
+  static packRows(rows: readonly BitSet[]): Uint32Array {
+    const w = rows.length ? rows[0].words.length : 0;
+    const out = new Uint32Array(rows.length * w);
+    rows.forEach((r, i) => out.set(r.words, i * w));
+    return out;
+  }
+
+  /** Inverse of {@link packRows}: `words.length / ⌈size/32⌉` rows of `size` bits, as views into `words` (no copy). */
+  static unpackRows(size: number, words: Uint32Array): BitSet[] {
+    const w = (size + 31) >>> 5;
+    return Array.from({ length: w ? words.length / w : 0 }, (_, i) => new BitSet(size, words.subarray(i * w, (i + 1) * w)));
+  }
+
   static fromHex(size: number, hex: string): BitSet {
     const set = new BitSet(size);
     for (let b = 0; b * 2 < hex.length; b++) {

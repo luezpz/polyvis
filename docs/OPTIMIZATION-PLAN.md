@@ -148,8 +148,8 @@ Left open, bench-driven: 1a flow half, 1c, 1f, 1g. The 3D flow is now dominated 
     reorders them, costs steps (2D Pillar forest +5%) and changes Σ portalVis both ways. Sorted
     by base rows, the result is bit-identical to the plain flow on every bench level except 3D
     Oblique lattice (which no longer truncates).
-  - Memory: slots (Σ out-degree) × portals bits; above `MAX_PASSAGE_BYTES` (256 MB) the table is
-    skipped and the compile silently uses planes. TODO: sparse rows for very large levels.
+  - Memory: slots (Σ out-degree) × portals bits, dense, no cap (removed 2026-11-18). E.g. 20k
+    portals × 6 out-portals ≈ 300 MB. TODO: sparse rows if big OBJ levels need it.
 
   Bench (`npm run bench -- --all --passages`; "base vis ms" = base + passage table; planes →
   passages; timings = 2 runs, single-threaded):
@@ -169,12 +169,42 @@ Left open, bench-driven: 1a flow half, 1c, 1f, 1g. The 3D flow is now dominated 
   Σ portalVis / Σ pvs identical everywhere except 3D Oblique lattice: 761912 → 750377 /
   69876 → 69245 (it now finishes instead of falling back to base vis). Net: big win on the
   worst case, small win on 2D Pillar forest / Oblique lattice, neutral 3D Pillar forest, loss on
-  Grid cities (the table build costs more than the flow saves). Not the default yet: the build
-  is single-threaded; parallelize it (rows of p are independent; one task per p on the worker
-  pool) or skip it on shallow levels, then re-measure and flip.
+  Grid cities (the table build costs more than the flow saves).
+
+  **Parallel table build: done (2026-11-18).** `computePassagesParallel` (`vis/parallelPassages.ts`):
+  rows of p are independent (`createPassageRows(p0, p1)`), so portal ranges of equal estimated
+  cost (`passageCosts`: (out-degree + 1) × (|mightSee| + 1), ×3 in 3D) go to workers, ~8 chunks
+  per worker, handed out on demand; bit-identical table (tested for 1/2/5 workers). Editors: the
+  compile worker's pool (`shared/app/compile/passagePool.ts`, `runPassages` of
+  `compileLevelAsync`); bench: `--threads <n>` (Node `worker_threads`, `scripts/benchWorker.*`).
+  Two fixes were needed before threads paid off:
+  - **Packed inputs**: cloning the object graph cost ~10 ms *per worker*, serialized on the
+    sender (2D Maze 16×16: 53 ms single vs 98 / 157 ms on 4 / 11 threads). Now
+    `packPortalGraph` + `BitSet.packRows` (typed arrays, memcpy clones): warm begin 2–9 ms.
+  - **Thread count by cost** (`MIN_COST_PER_THREAD` = 400k units ≈ 20 ms): small tables build
+    locally with no workers at all; others use ⌊cost / 400k⌋ threads at most.
+
+  Warm bench (`--repeat 3`, 12-core machine; table ms; total = base vis + table + flow, best of
+  4/11 threads; Σ pvs identical for 1/4/11 threads and to planes):
+
+  | level | table 1t | 4t | 11t | planes total | passages total |
+  |---|---|---|---|---|---|
+  | 2d/Grid city 8×8 | 116 | 51 | 48 | 517 | 573 |
+  | 2d/Maze 16×16 | 43 | local | local | 1261 | 1203 |
+  | 2d/Pillar forest | 440 | 173 | 149 | 8086 | **7535** |
+  | 2d/Oblique lattice | 179 | 65 | 53 | 2696 | **2235** |
+  | 3d/Grid city 6×6 | 352 | 126 | 115 | 1292 | 1310 |
+  | 3d/Pillar forest | 364 | 109 | 75 | 3043 | **2349** |
+  | 3d/Vent grille | 50 | 28 | 28 | 210 | 212 |
+  | 3d/Oblique lattice (cold, 1 run) | 1263 | | 413 | 90012 (trunc) | **66116** |
+
+  Row building scales ~3–5×, not 11× (load imbalance at the tail, likely ~6 physical cores).
+  With threads, passages win or tie on every heavy level except 2D Grid city (+11%); tiny levels
+  differ by a few ms. Still opt-in: single-threaded `compileLevel` (tests, Node) pays the full
+  table cost. Candidate next step: flip the default in the editors only (where the pool exists).
 2b. **Full passage rows in flow** (done with 2a, see above).
   - Keep `canSee(p,t)` rows; flow at depth ≥ 2: `newMight &= canSee(pass, gen)`.
-  - Memory: sparse / store only rows strictly tighter than mightSee[t]; pack in flowProtocol.
+  - Open: sparse rows (store only rows strictly tighter than mightSee[t]) to cut memory.
 
 ## Phase 3: smaller graph
 
@@ -266,7 +296,7 @@ Doors must block vis when closed, without rebaking.
 | 0 bench (done) | S | required to judge everything |
 | 1a sphere reject (base vis done) | S | base vis 2–2.5× |
 | 1b separator cache (done) | M | flow −15–23% 2D, −2–8% 3D |
-| 2a + 2b passages (done, option) | M | steps −3–37%; 3D Oblique lattice no longer truncates; table build cost |
+| 2a + 2b passages + parallel table (done, option) | M | steps −3–37%, total −7–23% on open levels with threads; 3D Oblique lattice no longer truncates |
 | 3b clusters | M | big on large/OBJ levels |
 | 3c column sharing | S | narrower rows, lossless |
 | 1d allocation-free bitsets, 1e early-out (done) | S | flow −10–17% |

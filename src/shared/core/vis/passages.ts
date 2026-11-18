@@ -30,20 +30,29 @@ export interface PassageTable {
   readonly words: Uint32Array;
 }
 
-/** Tables above this size are not built (memory: slots × portals / 8 bytes); callers fall back to plain vis. */
-export const MAX_PASSAGE_BYTES = 256 * 1024 * 1024;
-
-/**
- * Builds the {@link PassageTable} from base vis rows (`computeBaseVis`), or null if it would
- * exceed {@link MAX_PASSAGE_BYTES}.
- */
-export function computePassages<D extends Dim>(g: Geometry<D>, graph: PortalGraph<D>, mightSee: readonly BitSet[]): PassageTable | null {
-  const { portals, portalsFrom } = graph;
-  const n = portals.length, wordsPerRow = (n + 31) >>> 5;
+/** Slot offsets of a graph's {@link PassageTable}: `slot[p]` = Σ out-degree of portals before p (length n + 1). */
+export function passageSlots<D extends Dim>(graph: PortalGraph<D>): Int32Array {
+  const { portals, portalsFrom } = graph, n = portals.length;
   const slot = new Int32Array(n + 1);
   for (let p = 0; p < n; p++) slot[p + 1] = slot[p] + portalsFrom[portals[p].to].length;
-  if (slot[n] * wordsPerRow * 4 > MAX_PASSAGE_BYTES) return null;
-  const words = new Uint32Array(slot[n] * wordsPerRow);
+  return slot;
+}
+
+/** Builds the whole {@link PassageTable} on this thread from base vis rows (`computeBaseVis`). */
+export function computePassages<D extends Dim>(g: Geometry<D>, graph: PortalGraph<D>, mightSee: readonly BitSet[]): PassageTable {
+  const slot = passageSlots(graph), n = graph.portals.length, wordsPerRow = (n + 31) >>> 5;
+  const words = createPassageRows(g, graph, mightSee, slot)(0, n);
+  return { slot, wordsPerRow, words };
+}
+
+/**
+ * A row builder for one graph (sphere and scratch setup done once): `rows(p0, p1)` returns the
+ * canSee rows of portals `[p0, p1)`, i.e. table slots `[slot[p0], slot[p1])` (fresh array, words
+ * relative to `slot[p0]`). Ranges are independent, so workers can build them in parallel.
+ */
+export function createPassageRows<D extends Dim>(g: Geometry<D>, graph: PortalGraph<D>, mightSee: readonly BitSet[], slot: Int32Array): (p0: number, p1: number) => Uint32Array {
+  const { portals, portalsFrom } = graph;
+  const n = portals.length, wordsPerRow = (n + 31) >>> 5;
   const { center, radius } = portalSpheres(g, graph);
   // k clipped to the front of p's plane, per p (k' is the same for every t of p).
   const clipped: (Facet<D> | null | undefined)[] = new Array(n);
@@ -55,34 +64,37 @@ export function computePassages<D extends Dim>(g: Geometry<D>, graph: PortalGrap
     return g.clipFacet(f, plane);
   };
 
-  for (let p = 0; p < n; p++) {
-    const P = portals[p], mw = mightSee[p].words, out = portalsFrom[P.to];
-    clipped.fill(undefined);
-    for (let j = 0; j < out.length; j++) {
-      const t = out[j];
-      if (!mightSee[p].has(t)) continue;
-      const T = portals[t];
-      const src = g.clipFacet(P.winding, g.flipPlane(T.plane));
-      if (!src) continue;
-      const pass = g.clipFacet(T.winding, P.plane);
-      if (!pass) continue;
-      const base = (slot[p] + j) * wordsPerRow, tw = mightSee[t].words;
-      words[base + (t >>> 5)] |= 1 << (t & 31);
-      let seps: Plane<D>[] | null = null;
-      for (let w = 0; w < wordsPerRow; w++) {
-        for (let bits = mw[w] & tw[w]; bits !== 0; bits &= bits - 1) {
-          const k = (w << 5) | (31 - Math.clz32(bits & -bits));
-          let kf = clipped[k];
-          if (kf === undefined) kf = clipped[k] = clipK(portals[k].winding, k, P.plane);
-          if (!kf) continue;
-          seps ??= g.separators(src, pass);
-          for (let i = 0; i < seps.length && kf; i++) kf = clipK(kf, k, seps[i]);
-          if (kf) words[base + w] |= 1 << (k & 31);
+  return (p0, p1) => {
+    const words = new Uint32Array((slot[p1] - slot[p0]) * wordsPerRow);
+    for (let p = p0; p < p1; p++) {
+      const P = portals[p], mw = mightSee[p].words, out = portalsFrom[P.to];
+      clipped.fill(undefined);
+      for (let j = 0; j < out.length; j++) {
+        const t = out[j];
+        if (!mightSee[p].has(t)) continue;
+        const T = portals[t];
+        const src = g.clipFacet(P.winding, g.flipPlane(T.plane));
+        if (!src) continue;
+        const pass = g.clipFacet(T.winding, P.plane);
+        if (!pass) continue;
+        const base = (slot[p] - slot[p0] + j) * wordsPerRow, tw = mightSee[t].words;
+        words[base + (t >>> 5)] |= 1 << (t & 31);
+        let seps: Plane<D>[] | null = null;
+        for (let w = 0; w < wordsPerRow; w++) {
+          for (let bits = mw[w] & tw[w]; bits !== 0; bits &= bits - 1) {
+            const k = (w << 5) | (31 - Math.clz32(bits & -bits));
+            let kf = clipped[k];
+            if (kf === undefined) kf = clipped[k] = clipK(portals[k].winding, k, P.plane);
+            if (!kf) continue;
+            seps ??= g.separators(src, pass);
+            for (let i = 0; i < seps.length && kf; i++) kf = clipK(kf, k, seps[i]);
+            if (kf) words[base + w] |= 1 << (k & 31);
+          }
         }
       }
     }
-  }
-  return { slot, wordsPerRow, words };
+    return words;
+  };
 }
 
 /** Phase 2a: tightened mightSee rows (each ⊆ its base row) from a {@link PassageTable}. */

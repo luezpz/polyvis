@@ -59,8 +59,12 @@ only decisions, gotchas and open items. The 2D/3D merge (former PLAN.md / PROGRE
   baseline. Phase 2a + 2b (`baseVis: "passages"`: canSee table, tighter
   mightSee, per-depth flow pruning) done as an option, default off (table build costs more than it
   saves on shallow levels; fixes the 3D Oblique lattice truncation). Gotcha: with passages the
-  flow must order sources by the *base* rows (`orderBy`), else results and step counts drift. Any vis change must keep the `--all` non-timing columns identical
-  unless it is meant to change results. Bench: `npm run bench [-- --all | --only <s> | --obj <file>]`;
+  flow must order sources by the *base* rows (`orderBy`), else results and step counts drift.
+  The table builds on the worker pool (`passagePool.ts`, cost-based thread count) from packed
+  inputs (`packPortalGraph`, `BitSet.packRows`): object-graph clones cost ~10 ms per worker. No
+  memory cap (dense: slots × portals bits). Any vis change must keep the `--all` non-timing columns identical
+  unless it is meant to change results. Bench: `npm run bench [-- --all | --only <s> | --obj <file> | --passages | --threads <n> | --repeat <k>]`
+  (`--threads` = Node worker threads for the passage table; `--repeat` reports the last, warm run);
   it runs TS through `vite.runnerImport` (no `@types/node`: keep Node APIs in `scripts/bench.mjs`).
 
 ## Gotchas
