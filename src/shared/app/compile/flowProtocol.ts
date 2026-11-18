@@ -4,10 +4,10 @@
  * after the structured clone; {@link toBitSet} restores them.
  */
 
-import { BitSet, type Dim, type FlowRow, type PortalGraph, type SourceFlow } from "../../core";
+import { BitSet, type Dim, type FlowRow, type PassageTable, type PortalGraph, type SourceFlow } from "../../core";
 
 export type FlowRequest =
-  | { readonly type: "begin"; readonly id: number; readonly graph: PortalGraph<Dim>; readonly mightSee: readonly BitSet[]; readonly clipSource: boolean; readonly rank: Int32Array }
+  | { readonly type: "begin"; readonly id: number; readonly graph: PortalGraph<Dim>; readonly mightSee: readonly BitSet[]; readonly clipSource: boolean; readonly rank: Int32Array; readonly passages: PassageTable | null }
   | { readonly type: "flow"; readonly id: number; readonly known: readonly FlowRow[]; readonly sources: readonly number[]; readonly budget: number };
 
 export type FlowResponse =

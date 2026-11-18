@@ -31,6 +31,7 @@
 import type { Dim, Facet, Geometry, Plane } from "../geometry";
 import type { PortalGraph } from "../portals";
 import { BitSet } from "./bitset";
+import type { PassageTable } from "./passages";
 
 export interface PortalFlowOptions {
   /** Clip the source by the reverse antipenumbra (step 4). Tighter results, slightly more work. */
@@ -46,12 +47,25 @@ export interface PortalFlowOptions {
    * every generator whose step 1 leaves the source unchanged. Exact (same result); off only for tests.
    */
   readonly cacheSeparators: boolean;
+  /**
+   * Phase 2b: canSee rows (`computePassages`) ANDed into `might` at every step from `pass` to a
+   * generator. Conservative, tighter pruning; null: off. The pipeline sets it for `baseVis: "passages"`.
+   */
+  readonly passages: PassageTable | null;
+  /**
+   * Rows whose sizes set the source order ({@link portalFlowOrder}); null: `mightSee`. With
+   * passages the pipeline passes the *base* rows: the tighter rows reorder sources and cost
+   * steps (and change the result); base order gives the plain flow's result with fewer steps.
+   */
+  readonly orderBy: readonly BitSet[] | null;
 }
 
 export const DEFAULT_PORTAL_FLOW_OPTIONS: PortalFlowOptions = Object.freeze({
   clipSource: true,
   maxSteps: 20_000_000,
   cacheSeparators: true,
+  passages: null,
+  orderBy: null,
 });
 
 export interface PortalFlowStats {
@@ -117,9 +131,9 @@ export function portalFlowOrder(mightSee: readonly BitSet[]): number[] {
  * `onChain`: scratch, `graph.leafCount` zeros; left zeroed on return.
  * `rank`: position of each portal in the flow order, or null. When given, `known[j]` is only used if
  * `rank[j] < rank[sourceId]`, so the result is the single-threaded one even if `known` holds later rows.
- * `cacheSeparators`: see {@link PortalFlowOptions.cacheSeparators}.
+ * `cacheSeparators`, `passages`: see {@link PortalFlowOptions}.
  */
-export function flowFromSource<D extends Dim>(geometry: Geometry<D>, graph: PortalGraph<D>, mightSee: readonly BitSet[], known: readonly (BitSet | undefined)[], sourceId: number, clipSource: boolean, budget: number, onChain: Uint8Array, rank: Int32Array | null = null, cacheSeparators = true): SourceFlow {
+export function flowFromSource<D extends Dim>(geometry: Geometry<D>, graph: PortalGraph<D>, mightSee: readonly BitSet[], known: readonly (BitSet | undefined)[], sourceId: number, clipSource: boolean, budget: number, onChain: Uint8Array, rank: Int32Array | null = null, cacheSeparators = true, passages: PassageTable | null = null): SourceFlow {
   // Hot loop: bind the geometry operations once.
   const { clipFacet, flipPlane, clipToSeparators, separators, clipFacetToPlanes } = geometry;
   const { portals, portalsFrom } = graph;
@@ -139,11 +153,15 @@ export function flowFromSource<D extends Dim>(geometry: Geometry<D>, graph: Port
   const sourceMight = mightSee[sourceId];
   let done = false;
 
-  const recurse = (leaf: number, source: Facet<D>, pass: Facet<D> | null, might: BitSet, depth: number): void => {
+  // `passId`: portal whose winding `pass` is a part of (the source itself at depth 1); `leaf` is its `to`.
+  const recurse = (leaf: number, source: Facet<D>, pass: Facet<D> | null, passId: number, might: BitSet, depth: number): void => {
     if (depth > maxChainDepth) maxChainDepth = depth;
     // Separators of this frame's (source, pass), built on first use; valid while step 1 keeps `source`.
     let frameSeps: Plane<D>[] | null = null;
-    for (const gid of portalsFrom[leaf]) {
+    const out = portalsFrom[leaf];
+    const slot0 = passages ? passages.slot[passId] : 0;
+    for (let j = 0; j < out.length; j++) {
+      const gid = out[j];
       if (!might.has(gid)) continue;
       const gen = portals[gid];
       if (onChain[gen.to]) continue; // a straight line cannot re-enter a convex leaf
@@ -151,7 +169,9 @@ export function flowFromSource<D extends Dim>(geometry: Geometry<D>, graph: Port
       // Prune: if G is already known visible and nothing new could be found beyond it, skip.
       const row = rank && rank[gid] >= sourceRank ? undefined : known[gid];
       const newMight = rowAt(depth + 1);
-      const fresh = BitSet.andInto(newMight, might, row ?? mightSee[gid], vis);
+      const fresh = passages
+        ? BitSet.and3Into(newMight, might, row ?? mightSee[gid], passages.words, (slot0 + j) * passages.wordsPerRow, vis)
+        : BitSet.andInto(newMight, might, row ?? mightSee[gid], vis);
       if (vis.has(gid) && !fresh) continue;
 
       if (++steps > budget) {
@@ -190,7 +210,7 @@ export function flowFromSource<D extends Dim>(geometry: Geometry<D>, graph: Port
         }
       }
       onChain[gen.to] = 1;
-      recurse(gen.to, src, g, newMight, depth + 1);
+      recurse(gen.to, src, g, gid, newMight, depth + 1);
       onChain[gen.to] = 0;
       if (truncated || done) return;
     }
@@ -198,7 +218,7 @@ export function flowFromSource<D extends Dim>(geometry: Geometry<D>, graph: Port
 
   onChain[sourcePortal.from] = 1;
   onChain[sourcePortal.to] = 1;
-  recurse(sourcePortal.to, sourcePortal.winding, null, mightSee[sourceId], 1);
+  recurse(sourcePortal.to, sourcePortal.winding, null, sourceId, mightSee[sourceId], 1);
   onChain.fill(0);
 
   // If we were cut short, fall back to the conservative estimate for this portal.
@@ -213,13 +233,13 @@ export function computePortalFlow<D extends Dim>(geometry: Geometry<D>, graph: P
   const onChain = new Uint8Array(graph.leafCount);
   let stats = EMPTY_FLOW_STATS;
 
-  for (const sourceId of portalFlowOrder(mightSee)) {
+  for (const sourceId of portalFlowOrder(opts.orderBy ?? mightSee)) {
     if (stats.truncated) {
       portalVis[sourceId] = mightSee[sourceId].clone();
       continue;
     }
     const budget = opts.maxSteps > 0 ? opts.maxSteps - stats.steps : Infinity;
-    const r = flowFromSource(geometry, graph, mightSee, portalVis, sourceId, opts.clipSource, budget, onChain, null, opts.cacheSeparators);
+    const r = flowFromSource(geometry, graph, mightSee, portalVis, sourceId, opts.clipSource, budget, onChain, null, opts.cacheSeparators, opts.passages);
     portalVis[sourceId] = r.vis;
     stats = addSourceStats(stats, r);
   }

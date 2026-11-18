@@ -20,7 +20,7 @@ export function servePool<D extends Dim>(geometry: Geometry<D>): void {
   const answer = (req: FlowRequest | BspRequest): FlowResponse | BspResponse => {
     switch (req.type) {
       case "begin":
-        flow = createFlowSession(geometry, req.graph as unknown as PortalGraph<D>, req.mightSee.map(toBitSet), req.clipSource, req.rank);
+        flow = createFlowSession(geometry, req.graph as unknown as PortalGraph<D>, req.mightSee.map(toBitSet), req.clipSource, req.rank, req.passages);
         return { id: req.id, results: [] };
       case "flow": {
         if (!flow) throw new Error("flow before begin");

@@ -3,6 +3,7 @@ import {
   compileLevel, compileWalls, locateLeaf, leafComponents, makeWall, lineOfSight, SAMPLE_LEVELS,
   exportPvsJson, exportPvsText, decodePvsRow, decodeLeafPvs, pvsRowOf, type Wall, type Level, type CompileOptions, type PvsDocument,
 } from "../../src/d3/core";
+import { BitSet } from "../../src/shared/core";
 import { boxLevel, emptyLeaves, randomLevel, randomPointInLeaf, rng } from "./helpers";
 
 const sample = (name: string): Level => SAMPLE_LEVELS.find((s) => s.name === name)!.create();
@@ -250,17 +251,31 @@ describe("separator caching (1b)", () => {
   });
 });
 
-describe("passage vis (2a)", () => {
-  it("tightens mightSee to a subset that still covers the flow result", async () => {
-    const { computeBaseVis, computePassageVis, computePortalFlow } = await import("../../src/d3/core/vis/vis");
+describe("passage vis (2a + 2b)", () => {
+  it("canSee rows hold only base-vis portals; mightSee' is a subset that covers the flow", async () => {
+    const { computeBaseVis, computePassages, passageMightSee, computePortalFlow } = await import("../../src/d3/core/vis/vis");
     for (const level of [...SAMPLE_LEVELS.map((s) => s.create()), randomLevel(21, 8)]) {
       const { graph } = compileLevel(level);
-      const base = computeBaseVis(graph), tight = computePassageVis(graph, base);
+      const base = computeBaseVis(graph), table = computePassages(graph, base)!;
+      expect(table.slot[graph.portals.length]).toBe(graph.portals.reduce((s, p) => s + graph.portalsFrom[p.to].length, 0));
+      const tight = passageMightSee(graph, table);
       const flow = computePortalFlow(graph, base);
-      for (let i = 0; i < base.length; i++) {
-        expect(tight[i].hasAnyNotIn(base[i])).toBe(false);
-        expect(flow.portalVis[i].hasAnyNotIn(tight[i])).toBe(false);
+      for (let p = 0; p < base.length; p++) {
+        expect(tight[p].hasAnyNotIn(base[p])).toBe(false);
+        expect(flow.portalVis[p].hasAnyNotIn(tight[p])).toBe(false);
+        graph.portalsFrom[graph.portals[p].to].forEach((_t, j) => {
+          const row = new BitSet(base.length, table.words.slice((table.slot[p] + j) * table.wordsPerRow, (table.slot[p] + j + 1) * table.wordsPerRow));
+          expect(row.hasAnyNotIn(base[p])).toBe(false);
+        });
       }
+    }
+  });
+
+  it("flow with passages (base order) is a subset of the plain flow, with no more steps", () => {
+    for (const level of [...SAMPLE_LEVELS.map((s) => s.create()), randomLevel(7, 8), randomLevel(21, 8)]) {
+      const plain = compileLevel(level), pass = compileLevel(level, { baseVis: "passages" });
+      expect(pass.flowStats.steps).toBeLessThanOrEqual(plain.flowStats.steps);
+      for (let p = 0; p < plain.portalVis.length; p++) expect(pass.portalVis[p].hasAnyNotIn(plain.portalVis[p])).toBe(false);
     }
   });
 

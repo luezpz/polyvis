@@ -74,6 +74,21 @@ export class BitSet {
     return fresh !== 0;
   }
 
+  /**
+   * {@link andInto} with a third operand: `out = a ∩ b ∩ c`, `c` given as `cw[cOff, cOff + words)`
+   * (a `PassageTable` row). Returns true if `out ⊄ seen`.
+   */
+  static and3Into(out: BitSet, a: BitSet, b: BitSet, cw: Uint32Array, cOff: number, seen: BitSet): boolean {
+    const o = out.words, aw = a.words, bw = b.words, sw = seen.words;
+    let fresh = 0;
+    for (let i = 0; i < o.length; i++) {
+      const w = aw[i] & bw[i] & cw[cOff + i];
+      o[i] = w;
+      fresh |= w & ~sw[i];
+    }
+    return fresh !== 0;
+  }
+
   /** True if this set contains any bit that `other` does not (this ⊄ other). */
   hasAnyNotIn(other: BitSet): boolean {
     for (let i = 0; i < this.words.length; i++) if ((this.words[i] & ~other.words[i]) !== 0) return true;

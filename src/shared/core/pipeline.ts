@@ -10,7 +10,7 @@
 import { type BspBuildOptions, type BspBuildResult, type BspStats, type BspTree, type LeafSurface, buildBsp, buildLeafSurfaces } from "./bsp";
 import type { Dim, Geometry } from "./geometry";
 import { type LeakReport, type PortalGraph, detectLeaks } from "./portals";
-import { type BitSet, type PortalFlowOptions, type PortalFlowResult, type PortalFlowStats, type PvsSymmetry, type PvsTable, buildPvsTable, computeBaseVis, computePassageVis, computeLeafPvs, computePortalFlow } from "./vis";
+import { type BitSet, type PassageTable, type PortalFlowOptions, type PortalFlowResult, type PortalFlowStats, type PvsSymmetry, type PvsTable, buildPvsTable, computeBaseVis, computePassages, passageMightSee, computeLeafPvs, computePortalFlow } from "./vis";
 import type { Wall } from "./wall";
 
 export interface CompileOptions {
@@ -18,8 +18,9 @@ export interface CompileOptions {
   readonly flow: Partial<PortalFlowOptions>;
   readonly symmetry: PvsSymmetry;
   /**
-   * Base vis estimate: `"planes"` (rules 1 + 2 and flood) or `"passages"` (phase 2a: planes, then
-   * tightened by the antipenumbra of each first portal, `computePassageVis`). Both conservative.
+   * Base vis estimate: `"planes"` (rules 1 + 2 and flood) or `"passages"` (phases 2a + 2b: planes,
+   * then canSee rows of every portal pair (`computePassages`) tighten mightSee and prune the flow at
+   * every depth). Both conservative; `"passages"` falls back to planes if the table is too big.
    */
   readonly baseVis: BaseVisMode;
 }
@@ -114,24 +115,26 @@ export function createCompiler<D extends Dim, L>(config: CompilerConfig<D, L>): 
     const graph = timed(timings, "portals", () => config.buildPortalGraph(tree));
     const leaks = timed(timings, "leaks", () => detectLeaks(g, tree, graph));
     const base = timed(timings, "base vis", () => computeBaseVis(g, graph));
-    const mightSee = opts.baseVis === "passages" ? timed(timings, "passage vis", () => computePassageVis(g, graph, base)) : base;
-    return { walls, tree, bspStats, surfaces, graph, leaks, mightSee };
+    const passages = opts.baseVis === "passages" ? timed(timings, "passage vis", () => computePassages(g, graph, base)) : null;
+    const mightSee = passages ? timed(timings, "passage flood", () => passageMightSee(graph, passages)) : base;
+    return { walls, tree, bspStats, surfaces, graph, leaks, mightSee, passages, base };
   };
 
   /** Stages after portal flow, assembling the result. */
   const afterFlow = (pre: ReturnType<typeof beforeFlow>, flow: PortalFlowResult, opts: CompileOptions, timings: StageTiming[]): CompileResult<D> => {
+    const { passages: _passages, base: _base, ...rest } = pre; // flow-only inputs stay out of the result (size, worker clone)
     const { tree, graph, mightSee } = pre;
     const { portalVis, stats: flowStats } = flow;
     const pvs = timed(timings, "leaf pvs", () => computeLeafPvs(tree, graph, portalVis, opts.symmetry));
     const pvsTable = timed(timings, "pvs rows", () => buildPvsTable(pvs));
-    return { ...pre, detailWalls: [], portalVis, flowStats, pvs, pvsTable, summary: summarize(tree, graph, mightSee, portalVis, pvs), timings };
+    return { ...rest, detailWalls: [], portalVis, flowStats, pvs, pvsTable, summary: summarize(tree, graph, mightSee, portalVis, pvs), timings };
   };
 
   const compileWalls = (walls: readonly Wall<D>[], options: Partial<CompileOptions> = {}, timings: StageTiming[] = []): CompileResult<D> => {
     const opts: CompileOptions = { ...DEFAULT_COMPILE_OPTIONS, ...options };
     const bsp = timed(timings, "bsp", () => buildBsp(g, walls, bspOptions(opts)));
     const pre = beforeFlow(walls, bsp, opts, timings);
-    const flow = timed(timings, "portal flow", () => computePortalFlow(g, pre.graph, pre.mightSee, opts.flow));
+    const flow = timed(timings, "portal flow", () => computePortalFlow(g, pre.graph, pre.mightSee, flowOptions(opts, pre)));
     return afterFlow(pre, flow, opts, timings);
   };
 
@@ -158,12 +161,17 @@ export function createCompiler<D extends Dim, L>(config: CompilerConfig<D, L>): 
     timings.push({ stage: "bsp", ms: performance.now() - tb });
     const pre = beforeFlow(walls, bsp, opts, timings);
     const t0 = performance.now();
-    const flow = await runFlow(pre.graph, pre.mightSee, opts.flow);
+    const flow = await runFlow(pre.graph, pre.mightSee, flowOptions(opts, pre));
     timings.push({ stage: "portal flow", ms: performance.now() - t0 });
     return { ...afterFlow(pre, flow, opts, timings), detailWalls };
   };
 
   return { compileLevel, compileWalls, compileLevelAsync };
+}
+
+/** The flow options of a compile; with a passage table, also the table and the base-vis source order. */
+function flowOptions(opts: CompileOptions, pre: { readonly passages: PassageTable | null; readonly base: readonly BitSet[] }): Partial<PortalFlowOptions> {
+  return pre.passages ? { ...opts.flow, passages: pre.passages, orderBy: pre.base } : opts.flow;
 }
 
 /** Averages of the PVS and portal-vis set sizes, for the stats panel. */

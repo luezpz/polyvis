@@ -13,8 +13,8 @@ const MIN_PARALLEL_PORTALS = 200;
 /** One pool worker as a {@link FlowWorker}. */
 function poolFlowWorker(call: PoolCall): FlowWorker {
   return {
-    async begin(graph, mightSee, clipSource, rank) {
-      await call({ type: "begin", graph, mightSee, clipSource, rank });
+    async begin(graph, mightSee, clipSource, rank, passages) {
+      await call({ type: "begin", graph, mightSee, clipSource, rank, passages });
     },
     async flow(known, sources, budget) {
       const res = await call<Extract<FlowResponse, { results: unknown }>>({ type: "flow", known, sources, budget });

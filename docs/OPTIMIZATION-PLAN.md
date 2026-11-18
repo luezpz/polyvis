@@ -137,28 +137,42 @@ Left open, bench-driven: 1a flow half, 1c, 1f, 1g. The 3D flow is now dominated 
   - New module `vis/passages.ts`; pipeline option `basevis: "planes" | "passages"`.
   - Parallel: one task per p on the existing worker pool (rows are independent).
   - Tests: mightSee' ⊆ mightSee; final PVS identical (flow is exact either way).
-  **Status: done (2026-11-18) as option `baseVis: "passages"` (`computePassageVis`), default stays
-  `"planes"`: no win.** Single-threaded, no worker split yet. Correction to the plan: the final PVS
-  is *not* identical. The flow is order-dependent (sources sorted by |mightSee|, finished rows
-  prune later ones), so Σ portalVis moves both ways (2D Pillar forest 691076 → 690509, 2D Oblique
-  lattice 205746 → 206280); LOS tests pass either way. Bench (`npm run bench -- --passages`;
-  base vis ms includes the passage stage; planes → passages):
+  **Status 2a + 2b: done (2026-11-18), option `baseVis: "passages"`, default stays `"planes"`.**
+  2a alone was nearly useless (first attempt: steps −1% at best, more on open levels): the flow
+  already rejects those portals at depth 2 for one clip. The win needs 2b, so both ship together:
+  `computePassages` builds a flat `PassageTable` (one canSee row per (p, t), q3map2
+  `CreatePassages`, sphere pre-tests per clip, exact), `passageMightSee` derives 2a's rows, and the
+  flow ANDs canSee(pass, gen) into `might` at every step (`PortalFlowOptions.passages`; parallel
+  workers get the table in `begin`). Two findings:
+  - **Order by base vis** (`PortalFlowOptions.orderBy`): sorting sources by the tighter rows
+    reorders them, costs steps (2D Pillar forest +5%) and changes Σ portalVis both ways. Sorted
+    by base rows, the result is bit-identical to the plain flow on every bench level except 3D
+    Oblique lattice (which no longer truncates).
+  - Memory: slots (Σ out-degree) × portals bits; above `MAX_PASSAGE_BYTES` (256 MB) the table is
+    skipped and the compile silently uses planes. TODO: sparse rows for very large levels.
 
-  | level | Σ mightSee | base vis ms | flow ms | steps |
+  Bench (`npm run bench -- --all --passages`; "base vis ms" = base + passage table; planes →
+  passages; timings = 2 runs, single-threaded):
+
+  | level | Σ mightSee | steps | base vis ms | flow ms |
   |---|---|---|---|---|
-  | 2d/Grid city 8×8 | 408058 → 333996 | 221 → 330 | 299 → 291 | 84859 → 81591 |
-  | 2d/Maze 16×16 | 80250 → 70731 | 975 → 1019 | 214 → 209 | 52424 → 51918 |
-  | 2d/Pillar forest | 1717614 → 1549352 | 701 → 1179 | 7240 → 7490 | 2085171 → 2192422 |
-  | 2d/Oblique lattice | 583538 → 514121 | 243 → 406 | 2428 → 2488 | 888221 → 904020 |
-  | 3d/Grid city 6×6 | 444235 → 387468 | 742 → 937 | 652 → 588 | 147259 → 135547 |
-  | 3d/Pillar forest | 296424 → 271308 | 181 → 514 | 2436 → 2473 | 500438 → 511612 |
-  | 3d/Vent grille | 51768 → 44892 | 44 → 88 | 170 → 175 | 50410 → 48728 |
-  | 3d/Oblique lattice | 856051 → 835274 | 476 → 1133 | ~91500 → 90494 (both trunc) | 20 M (trunc) |
+  | 2d/Grid city 8×8 | 408058 → 333996 | 84859 → 78820 | ~230 → ~330 | ~300 → ~295 |
+  | 2d/Maze 16×16 | 80250 → 70731 | 52424 → 50881 | ~1020 → ~1050 | ~205 → ~225 |
+  | 2d/Pillar forest | 1717614 → 1549352 | 2085171 → 1755139 | ~700–870 → ~1080–1220 | ~7000–7650 → ~6450 |
+  | 2d/Oblique lattice | 583538 → 514121 | 888221 → 589002 | 251 → 432 | 2332 → 1895 |
+  | 3d/Grid city 6×6 | 444235 → 387468 | 147259 → 132954 | ~630 → ~950 | ~620 → ~600 |
+  | 3d/Pillar forest | 296424 → 271308 | 500438 → 412033 | ~190 → ~510 | ~2440 → ~2130 |
+  | 3d/Vent grille | 51768 → 44892 | 50410 → 38022 | 42 → 90 | 169 → 148 |
+  | 3d/Overlap pile | 70416 → 69726 | 187356 → 129490 | 61 → 176 | 830 → 645 |
+  | 3d/Oblique lattice | 856051 → 835274 | 20 M (trunc) → **12499401** | 489 → 1724 | 89523 (trunc) → **68677** |
 
-  Why: mightSee drops 8–28%, but the flow already prunes those portals at depth 2 for the cost
-  of one clip; the steps it wastes are at depth ≥ 3 in open levels, which 2a does not touch.
-  3D Oblique lattice still truncates. Next for steps: 2b (passage rows at every depth), or 3b/3e.
-2b. **Full passage rows in flow** (only if 2a leaves deep chains dominant).
+  Σ portalVis / Σ pvs identical everywhere except 3D Oblique lattice: 761912 → 750377 /
+  69876 → 69245 (it now finishes instead of falling back to base vis). Net: big win on the
+  worst case, small win on 2D Pillar forest / Oblique lattice, neutral 3D Pillar forest, loss on
+  Grid cities (the table build costs more than the flow saves). Not the default yet: the build
+  is single-threaded; parallelize it (rows of p are independent; one task per p on the worker
+  pool) or skip it on shallow levels, then re-measure and flip.
+2b. **Full passage rows in flow** (done with 2a, see above).
   - Keep `canSee(p,t)` rows; flow at depth ≥ 2: `newMight &= canSee(pass, gen)`.
   - Memory: sparse / store only rows strictly tighter than mightSee[t]; pack in flowProtocol.
 
@@ -252,7 +266,7 @@ Doors must block vis when closed, without rebaking.
 | 0 bench (done) | S | required to judge everything |
 | 1a sphere reject (base vis done) | S | base vis 2–2.5× |
 | 1b separator cache (done) | M | flow −15–23% 2D, −2–8% 3D |
-| 2a passage mightSee (done, option, no win) | M | mightSee −8–28%, flow ≈ unchanged |
+| 2a + 2b passages (done, option) | M | steps −3–37%; 3D Oblique lattice no longer truncates; table build cost |
 | 3b clusters | M | big on large/OBJ levels |
 | 3c column sharing | S | narrower rows, lossless |
 | 1d allocation-free bitsets, 1e early-out (done) | S | flow −10–17% |
@@ -260,4 +274,4 @@ Doors must block vis when closed, without rebaking.
 | 3.5 incremental recompile | L | editor turnaround |
 | 4 runtime clipping | L | runtime culling |
 | 4b occluding doors | M | closed doors hide rooms, no rebake |
-| 1c, 1f, 1g, 2b, 3a, 3d, 3f, 5 | S–M | situational, bench-driven |
+| 1c, 1f, 1g, 3a, 3d, 3f, 5 | S–M | situational, bench-driven |

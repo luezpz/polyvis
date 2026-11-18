@@ -35,7 +35,7 @@ src/shared/core/      dimension-agnostic compiler, generic over D extends Dim
   bsp/                build (subtree tasks + assembly), parallel build, pack (flat worker
                       messages), refine (corner/size splits), query, leaf surfaces, types
   portals/            Portal<D>/PortalGraph<D> types, components, leak detection
-  vis/                BitSet, base vis, portal flow (+ exact parallel dependency scheduler), leaf PVS, shared PVS rows
+  vis/                BitSet, base vis, passages (canSee table), portal flow (+ exact parallel dependency scheduler), leaf PVS, shared PVS rows
   pipeline.ts         createCompiler(config) → { compileLevel, compileWalls }
   export/pvsRows.ts   decodePvsRow
   gen/maze.ts         seeded RNG + maze generator for demo levels

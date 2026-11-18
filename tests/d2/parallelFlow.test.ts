@@ -22,6 +22,18 @@ describe("parallel portal flow (dependency scheduling)", () => {
     }
   });
 
+  it("matches the single-threaded flow with passages (2b)", async () => {
+    for (const level of levels()) {
+      const r = compileLevel(level, { baseVis: "passages" });
+      const base = compileLevel(level).mightSee;
+      const { computePassages } = await import("../../src/d2/core/vis/vis");
+      const passages = computePassages(r.graph, base)!;
+      const p = await computePortalFlowParallel(r.graph, r.mightSee, workers(3), { passages, orderBy: base });
+      expect(same(p.portalVis, r.portalVis)).toBe(true);
+      expect(p.stats).toEqual(r.flowStats);
+    }
+  });
+
   it("counts the flow's clip calls", () => {
     const { flowStats: f } = compileLevel(SAMPLE_LEVELS[0].create());
     expect(f.facetClips).toBeGreaterThanOrEqual(f.steps); // step 1 always runs, step 2 if 1 survives

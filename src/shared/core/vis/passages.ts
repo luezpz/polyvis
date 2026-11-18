@@ -1,64 +1,104 @@
 /**
- * Phase 2a: tightened "might see" (q3map2 passage vis, `CreatePassages`).
+ * Passage vis (q3map2 `CreatePassages` / `PassagePortalFlow`; phases 2a + 2b).
  *
- * Any sight line from portal p leaves leaf `p.to` through some first portal t, then hits every
- * later portal k inside the antipenumbra of (p, t). So
+ * A sight line that crosses portal p and then portal t (t leaves leaf `p.to`) hits every later
+ * portal k inside the antipenumbra of (p, t). So for every such pair
  *
  *   canSee(p, t) = { t } ∪ { k ∈ mightSee[p] ∩ mightSee[t] : clipToSeparators(p', t', k') ≠ null }
- *   mightSee'[p] = flood from p.to through ∪_t canSee(p, t)
  *
- * with p' = p behind t, t' = t in front of p, k' = k in front of p (flow steps 1–2, depth 1/2
- * with the whole source). This is the flow's depth-2 test with an unclipped source, so it only
- * drops portals no sight line reaches: mightSee' ⊆ mightSee, still conservative.
+ * with p' = p behind t, t' = t in front of p, k' = k in front of p (empty if p' or t' vanish).
+ * Only portals no sight line reaches are dropped, so both uses stay conservative:
+ *
+ * - 2a: mightSee'[p] = flood from p.to through ∪_t canSee(p, t)   ({@link passageMightSee})
+ * - 2b: the flow, stepping from `pass` to generator `gen`, ANDs canSee(pass, gen) into `might`,
+ *   so every depth is pruned by the antipenumbra of its last two portals, not just depth 1.
  */
 
-import type { Dim, Geometry } from "../geometry";
+import type { Dim, Facet, Geometry, Plane } from "../geometry";
+import { PLANE_EPSILON } from "../math";
 import type { PortalGraph } from "../portals";
+import { portalSpheres } from "./baseVis";
 import { BitSet } from "./bitset";
 
 /**
- * Tightened mightSee rows. `mightSee`: base vis rows (`computeBaseVis`), one per portal.
- * Returns new rows, each a subset of its input row.
+ * canSee rows, flat (structured-clone friendly). Row of (p, `portalsFrom[p.to][j]`) is slot
+ * `slot[p] + j`; its words are `words[s * wordsPerRow, (s + 1) * wordsPerRow)`, bits = portals.
  */
-export function computePassageVis<D extends Dim>(g: Geometry<D>, graph: PortalGraph<D>, mightSee: readonly BitSet[]): BitSet[] {
-  const n = graph.portals.length;
-  const out: BitSet[] = new Array(n);
-  const visitedLeaf = new Uint8Array(graph.leafCount);
-  for (let p = 0; p < n; p++) {
-    out[p] = floodPortals(graph, graph.portals[p].to, passageCandidates(g, graph, mightSee, p), visitedLeaf);
-  }
-  return out;
+export interface PassageTable {
+  readonly slot: Int32Array;
+  readonly wordsPerRow: number;
+  readonly words: Uint32Array;
 }
 
-/** ∪_t canSee(p, t) over the first portals t out of `p.to` (see module doc). Not yet flooded. */
-function passageCandidates<D extends Dim>(g: Geometry<D>, graph: PortalGraph<D>, mightSee: readonly BitSet[], p: number): BitSet {
-  const { portals } = graph;
-  const P = portals[p], mp = mightSee[p], n = portals.length;
-  const cand = new BitSet(n);
-  const mw = mp.words, cw = cand.words;
-  for (const t of graph.portalsFrom[P.to]) {
-    if (!mp.has(t)) continue;
-    const T = portals[t];
-    const src = g.clipFacet(P.winding, g.flipPlane(T.plane));
-    if (!src) continue;
-    const pass = g.clipFacet(T.winding, P.plane);
-    if (!pass) continue;
-    cand.set(t);
-    const seps = g.separators(src, pass);
-    const tw = mightSee[t].words;
-    for (let w = 0; w < mw.length; w++) {
-      // Candidates k of this word not already accepted through another t.
-      let bits = mw[w] & tw[w] & ~cw[w];
-      while (bits !== 0) {
-        const low = bits & -bits;
-        bits ^= low;
-        const k = (w << 5) + (31 - Math.clz32(low));
-        const kf = g.clipFacet(portals[k].winding, P.plane);
-        if (kf && g.clipFacetToPlanes(kf, seps)) cw[w] |= low;
+/** Tables above this size are not built (memory: slots × portals / 8 bytes); callers fall back to plain vis. */
+export const MAX_PASSAGE_BYTES = 256 * 1024 * 1024;
+
+/**
+ * Builds the {@link PassageTable} from base vis rows (`computeBaseVis`), or null if it would
+ * exceed {@link MAX_PASSAGE_BYTES}.
+ */
+export function computePassages<D extends Dim>(g: Geometry<D>, graph: PortalGraph<D>, mightSee: readonly BitSet[]): PassageTable | null {
+  const { portals, portalsFrom } = graph;
+  const n = portals.length, wordsPerRow = (n + 31) >>> 5;
+  const slot = new Int32Array(n + 1);
+  for (let p = 0; p < n; p++) slot[p + 1] = slot[p] + portalsFrom[portals[p].to].length;
+  if (slot[n] * wordsPerRow * 4 > MAX_PASSAGE_BYTES) return null;
+  const words = new Uint32Array(slot[n] * wordsPerRow);
+  const { center, radius } = portalSpheres(g, graph);
+  // k clipped to the front of p's plane, per p (k' is the same for every t of p).
+  const clipped: (Facet<D> | null | undefined)[] = new Array(n);
+  /** `f` (a part of portal k) clipped to the front of `plane`, sphere-tested first (exact, as in base vis). */
+  const clipK = (f: Facet<D>, k: number, plane: Plane<D>): Facet<D> | null => {
+    const d = g.signedDistance(plane, center[k]), r = radius[k];
+    if (d + r <= PLANE_EPSILON) return null; // every vertex within ε of or behind the plane: clipped away
+    if (d - r > PLANE_EPSILON) return f; // every vertex strictly in front: unchanged
+    return g.clipFacet(f, plane);
+  };
+
+  for (let p = 0; p < n; p++) {
+    const P = portals[p], mw = mightSee[p].words, out = portalsFrom[P.to];
+    clipped.fill(undefined);
+    for (let j = 0; j < out.length; j++) {
+      const t = out[j];
+      if (!mightSee[p].has(t)) continue;
+      const T = portals[t];
+      const src = g.clipFacet(P.winding, g.flipPlane(T.plane));
+      if (!src) continue;
+      const pass = g.clipFacet(T.winding, P.plane);
+      if (!pass) continue;
+      const base = (slot[p] + j) * wordsPerRow, tw = mightSee[t].words;
+      words[base + (t >>> 5)] |= 1 << (t & 31);
+      let seps: Plane<D>[] | null = null;
+      for (let w = 0; w < wordsPerRow; w++) {
+        for (let bits = mw[w] & tw[w]; bits !== 0; bits &= bits - 1) {
+          const k = (w << 5) | (31 - Math.clz32(bits & -bits));
+          let kf = clipped[k];
+          if (kf === undefined) kf = clipped[k] = clipK(portals[k].winding, k, P.plane);
+          if (!kf) continue;
+          seps ??= g.separators(src, pass);
+          for (let i = 0; i < seps.length && kf; i++) kf = clipK(kf, k, seps[i]);
+          if (kf) words[base + w] |= 1 << (k & 31);
+        }
       }
     }
   }
-  return cand;
+  return { slot, wordsPerRow, words };
+}
+
+/** Phase 2a: tightened mightSee rows (each ⊆ its base row) from a {@link PassageTable}. */
+export function passageMightSee<D extends Dim>(graph: PortalGraph<D>, table: PassageTable): BitSet[] {
+  const n = graph.portals.length, { slot, wordsPerRow, words } = table;
+  const visitedLeaf = new Uint8Array(graph.leafCount);
+  const out: BitSet[] = new Array(n);
+  for (let p = 0; p < n; p++) {
+    const union = new BitSet(n), uw = union.words;
+    for (let s = slot[p]; s < slot[p + 1]; s++) {
+      const base = s * wordsPerRow;
+      for (let w = 0; w < wordsPerRow; w++) uw[w] |= words[base + w];
+    }
+    out[p] = floodPortals(graph, graph.portals[p].to, union, visitedLeaf);
+  }
+  return out;
 }
 
 /**

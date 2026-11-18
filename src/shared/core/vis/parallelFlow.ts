@@ -23,6 +23,7 @@
 
 import type { Dim, Geometry } from "../geometry";
 import type { PortalGraph } from "../portals";
+import type { PassageTable } from "./passages";
 import type { BitSet } from "./bitset";
 import { DEFAULT_PORTAL_FLOW_OPTIONS, EMPTY_FLOW_STATS, type PortalFlowOptions, type PortalFlowResult, type SourceFlow, addSourceStats, flowFromSource, portalFlowOrder } from "./portalFlow";
 
@@ -34,8 +35,11 @@ export interface FlowRow {
 
 /** One flow thread. A worker gets one `flow` call at a time. */
 export interface FlowWorker {
-  /** Starts a run over `graph` / `mightSee`, with `rank[i]` = position of portal i in the flow order. Forgets earlier runs. */
-  begin<D extends Dim>(graph: PortalGraph<D>, mightSee: readonly BitSet[], clipSource: boolean, rank: Int32Array): Promise<void>;
+  /**
+   * Starts a run over `graph` / `mightSee`, with `rank[i]` = position of portal i in the flow order
+   * and optional canSee rows (`PortalFlowOptions.passages`). Forgets earlier runs.
+   */
+  begin<D extends Dim>(graph: PortalGraph<D>, mightSee: readonly BitSet[], clipSource: boolean, rank: Int32Array, passages: PassageTable | null): Promise<void>;
   /** Adds `known` rows, then flows `sources`, sharing `budget` generator tests (`Infinity`: unlimited). */
   flow(known: readonly FlowRow[], sources: readonly number[], budget: number): Promise<SourceFlow[]>;
 }
@@ -60,7 +64,7 @@ const MAX_BATCH = 8;
  * The worker-side state of a run: graph, base vis and the rows received so far.
  * `flow` has the {@link FlowWorker.flow} contract, synchronously.
  */
-export function createFlowSession<D extends Dim>(geometry: Geometry<D>, graph: PortalGraph<D>, mightSee: readonly BitSet[], clipSource: boolean, rank: Int32Array) {
+export function createFlowSession<D extends Dim>(geometry: Geometry<D>, graph: PortalGraph<D>, mightSee: readonly BitSet[], clipSource: boolean, rank: Int32Array, passages: PassageTable | null = null) {
   const known: (BitSet | undefined)[] = new Array(graph.portals.length);
   const onChain = new Uint8Array(graph.leafCount);
   return {
@@ -70,7 +74,7 @@ export function createFlowSession<D extends Dim>(geometry: Geometry<D>, graph: P
       let left = budget;
       for (const id of sources) {
         // A batch's sources never depend on each other (all were ready together), so no rows are shared within it.
-        const r = left > 0 ? flowFromSource(geometry, graph, mightSee, known, id, clipSource, left, onChain, rank)
+        const r = left > 0 ? flowFromSource(geometry, graph, mightSee, known, id, clipSource, left, onChain, rank, true, passages)
           : { sourceId: id, vis: mightSee[id].clone(), steps: 0, maxChainDepth: 0, truncated: true, facetClips: 0, separatorClips: 0 };
         left -= r.steps;
         out.push(r);
@@ -84,8 +88,8 @@ export function createFlowSession<D extends Dim>(geometry: Geometry<D>, graph: P
 export function inProcessFlowWorker<D extends Dim>(geometry: Geometry<D>): FlowWorker {
   let session: ReturnType<typeof createFlowSession<D>> | null = null;
   return {
-    async begin(graph, mightSee, clipSource, rank) {
-      session = createFlowSession(geometry, graph as unknown as PortalGraph<D>, mightSee, clipSource, rank);
+    async begin(graph, mightSee, clipSource, rank, passages) {
+      session = createFlowSession(geometry, graph as unknown as PortalGraph<D>, mightSee, clipSource, rank, passages);
     },
     async flow(known, sources, budget) {
       if (!session) throw new Error("flow before begin");
@@ -159,7 +163,7 @@ export async function computePortalFlowParallel<D extends Dim>(graph: PortalGrap
   const opts: PortalFlowOptions = { ...DEFAULT_PORTAL_FLOW_OPTIONS, ...options };
   const n = mightSee.length;
   const rank = new Int32Array(n);
-  portalFlowOrder(mightSee).forEach((id, r) => { rank[id] = r; });
+  portalFlowOrder(opts.orderBy ?? mightSee).forEach((id, r) => { rank[id] = r; });
   const { dependents, pending } = dependencyGraph(mightSee, rank);
 
   const portalVis: BitSet[] = new Array(n);
@@ -171,7 +175,7 @@ export async function computePortalFlowParallel<D extends Dim>(graph: PortalGrap
   let finished = 0;
   let maxReady = 0, readySum = 0, dispatches = 0;
 
-  await Promise.all(workers.map((w) => w.begin(graph, mightSee, opts.clipSource, rank)));
+  await Promise.all(workers.map((w) => w.begin(graph, mightSee, opts.clipSource, rank, opts.passages)));
   if (n === 0) return { portalVis, stats, parallel: { maxReady, meanReady: 0 } };
 
   const complete = (r: SourceFlow): void => {

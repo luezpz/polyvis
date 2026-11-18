@@ -56,7 +56,7 @@ export function main(args: readonly string[], readText: (path: string) => string
     if (!all && (SLOW.has(c.name) || c.group?.startsWith("Edge"))) continue;
     const r = c.compile();
     const f = r.flowStats;
-    const row = [c.name, r.graph.portals.length, (ms(r, "base vis") + ms(r, "passage vis")).toFixed(0), total(r.mightSee), ms(r, "portal flow").toFixed(0),
+    const row = [c.name, r.graph.portals.length, (ms(r, "base vis") + ms(r, "passage vis") + ms(r, "passage flood")).toFixed(0), total(r.mightSee), ms(r, "portal flow").toFixed(0),
       f.steps + (f.truncated ? " (trunc)" : ""), f.facetClips, f.separatorClips, total(r.portalVis), total(r.pvs)];
     console.log(`| ${row.join(" | ")} |`);
   }
