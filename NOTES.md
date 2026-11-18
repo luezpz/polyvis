@@ -53,22 +53,29 @@ only decisions, gotchas and open items. The 2D/3D merge (former PLAN.md / PROGRE
   ignored on rooms: a detail room would remove empty space. TODO: export `detailWalls` with
   the leaves each face touches, so a game can PVS-cull them.
 
-- Optimization work follows `docs/OPTIMIZATION-PLAN.md`; phase 0 (bench + flow counters) and 1a base-vis spheres, 1b separator cache, 1d/1e (allocation-free flow rows, source early-out) done; next phase 2a,
-  baseline table there. Bench: `npm run bench [-- --all | --only <s> | --obj <file>]`; it runs TS
-  through `vite.runnerImport` (no `@types/node`: keep Node APIs in `scripts/bench.mjs`).
+- Optimization work follows `docs/OPTIMIZATION-PLAN.md` (status, before/after tables there).
+  Done: phase 0 (bench, flow counters), phase 1 (1a base-vis spheres, 1b separator cache, 1d/1e
+  allocation-free flow rows + source early-out), all exact: bench counters identical to the
+  baseline. Next: phase 2a. Any vis change must keep the `--all` non-timing columns identical
+  unless it is meant to change results. Bench: `npm run bench [-- --all | --only <s> | --obj <file>]`;
+  it runs TS through `vite.runnerImport` (no `@types/node`: keep Node APIs in `scripts/bench.mjs`).
 
 ## Gotchas
+- The flow's separator cache (1b) relies on `clipFacet` returning the **same object** when nothing
+  is cut (both kernels do); `Geometry.separators` must list planes in `clipToSeparators` order.
 - Git history of the source repos (`polyvis2d` cdac3e9, `polyvis3d` 2de2526) was not carried over.
 
 ## Open TODOs
-- 3D Oblique lattice truncates at the 20 M `maxSteps` budget (bench, single-threaded).
+- 3D Oblique lattice truncates at the 20 M `maxSteps` budget (bench, single-threaded; ~92 s
+  after phase 1, was ~118 s). Phase 2a (fewer steps) is the fix candidate.
 - Browser smoke test never done by an agent: `/2d.html` worker compile, select tool
   (click-to-cycle, edge push/pull), surfaces layer; `/3d.html` panel after the shared-UI refactor.
 - Parallel flow and parallel BSP never run in a browser by an agent: confirm nested workers
   start, and measure the speed-up on a big 3D level (console.debug logs ready-source counts);
   tune `MAX_BATCH` / `MIN_PARALLEL_PORTALS` / `MIN_PARALLEL_WALLS` / `MAX_BSP_THREADS`.
 - Base vis (`computeBaseVis`) is the biggest stage on large levels (118 s vs 2.7 s BSP at 300
-  rooms) and is still single-threaded: the next parallelization target.
+  rooms, measured before phase 1a made it 2–2.5× faster) and is still single-threaded: the next
+  parallelization target (rows are independent).
 - Open decision: merge the two editor shells (panel/app) further, or keep sharing helpers only.
 - PAS (Potentially Audible Set) baking
 - Convex hulls generation (for physics engines, navmesh, etc.)

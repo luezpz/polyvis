@@ -108,6 +108,25 @@ Observations:
   planes before building separators; test the separators most likely to clip first (last
   one that clipped, Quake-style heuristics).
 
+**Phase 1 summary (2026-11-18): 1a (base vis half), 1b, 1d, 1e done; all exact.** `npm run bench
+-- --all` after phase 1 matches the phase 0 baseline in every non-timing column on all 26 levels
+(portals, Σ mightSee, steps, clips, Σ portalVis, Σ pvs; 3D Oblique lattice still truncates at the
+same step). Timings, same machine, single run (ms, baseline → after):
+
+| level | base vis | flow |
+|---|---|---|
+| 2d/Grid city 8×8 | 545 → ~230 | 403 → ~290 |
+| 2d/Maze 16×16 | 2671 → ~1130 | 262 → ~215 |
+| 2d/Pillar forest | 1610 → ~760 | 9974 → ~7400 |
+| 2d/Oblique lattice | 667 → ~250 | 3830 → ~2400 |
+| 3d/Grid city 6×6 | 1211 → ~650 | 858 → ~650 |
+| 3d/Pillar forest | 407 → ~190 | 2919 → ~2450 |
+| 3d/Overlap pile | 88 → 57 | 1084 → 814 |
+| 3d/Oblique lattice | 1134 → 476 | 117809 → 91530 (trunc) |
+
+Left open, bench-driven: 1a flow half, 1c, 1f, 1g. The 3D flow is now dominated by step 4
+(per-generator reverse antipenumbra) and by step count: phase 2a is next.
+
 ## Phase 2: tighter base vis (q3map2 passage vis)
 
 2a. **Tightened mightSee** (default candidate).
@@ -209,13 +228,13 @@ Doors must block vis when closed, without rebaking.
 
 | Phase | Effort | Payoff |
 |---|---|---|
-| 0 bench | S | required to judge everything |
-| 1a sphere reject | S | modest, base vis + flow |
-| 1b separator cache | M | likely largest flow win |
+| 0 bench (done) | S | required to judge everything |
+| 1a sphere reject (base vis done) | S | base vis 2–2.5× |
+| 1b separator cache (done) | M | flow −15–23% 2D, −2–8% 3D |
 | 2a passage mightSee | M | fewer steps on deep chains |
 | 3b clusters | M | big on large/OBJ levels |
 | 3c column sharing | S | narrower rows, lossless |
-| 1d allocation-free bitsets, 1e early-out | S | fewer allocations, less GC |
+| 1d allocation-free bitsets, 1e early-out (done) | S | flow −10–17% |
 | 3e lossless leaf merging | S–M | fewer leaves/portals, exact |
 | 3.5 incremental recompile | L | editor turnaround |
 | 4 runtime clipping | L | runtime culling |

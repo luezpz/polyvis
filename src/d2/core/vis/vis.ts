@@ -16,8 +16,7 @@ export {
 /** Base vis rules 1 + 2 for an ordered portal pair. */
 export const portalMightSeePortal = (graph: PortalGraph, i: number, j: number): boolean => shared.portalMightSeePortal(geometry2, graph, i, j);
 
-/** The "might see" set of every portal. */
-/** `useSpheres`: bounding-sphere pre-test (same result, faster). */
+/** The "might see" set of every portal. `useSpheres`: bounding-sphere pre-test (same result, faster). */
 export const computeBaseVis = (graph: PortalGraph, useSpheres = true): shared.BitSet[] => shared.computeBaseVis(geometry2, graph, useSpheres);
 
 /** Portal flow: the portals each portal can really see through (conservative). */
