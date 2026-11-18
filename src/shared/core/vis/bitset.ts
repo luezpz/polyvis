@@ -59,6 +59,21 @@ export class BitSet {
     return this.clone().andWith(other);
   }
 
+  /**
+   * Fused flow step: `out = a ∩ b` in place (no allocation), returning true if `out ⊄ seen`.
+   * `out`, `a`, `b`, `seen`: same size; `out` may alias `a` or `b`.
+   */
+  static andInto(out: BitSet, a: BitSet, b: BitSet, seen: BitSet): boolean {
+    const o = out.words, aw = a.words, bw = b.words, sw = seen.words;
+    let fresh = 0;
+    for (let i = 0; i < o.length; i++) {
+      const w = aw[i] & bw[i];
+      o[i] = w;
+      fresh |= w & ~sw[i];
+    }
+    return fresh !== 0;
+  }
+
   /** True if this set contains any bit that `other` does not (this ⊄ other). */
   hasAnyNotIn(other: BitSet): boolean {
     for (let i = 0; i < this.words.length; i++) if ((this.words[i] & ~other.words[i]) !== 0) return true;

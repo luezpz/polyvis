@@ -125,6 +125,12 @@ export function flowFromSource<D extends Dim>(geometry: Geometry<D>, graph: Port
   let truncated = false;
   let facetClips = 0;
   let separatorClips = 0;
+  // 1d: one `might` row per recursion depth, reused across generators (no per-step allocation).
+  const rows: BitSet[] = [];
+  const rowAt = (depth: number): BitSet => rows[depth] ?? (rows[depth] = new BitSet(portals.length));
+  // 1e: once vis covers mightSee[source], no step can add anything: stop the whole source.
+  const sourceMight = mightSee[sourceId];
+  let done = false;
 
   const recurse = (leaf: number, source: Facet<D>, pass: Facet<D> | null, might: BitSet, depth: number): void => {
     if (depth > maxChainDepth) maxChainDepth = depth;
@@ -135,8 +141,9 @@ export function flowFromSource<D extends Dim>(geometry: Geometry<D>, graph: Port
 
       // Prune: if G is already known visible and nothing new could be found beyond it, skip.
       const row = rank && rank[gid] >= sourceRank ? undefined : known[gid];
-      const newMight = might.and(row ?? mightSee[gid]);
-      if (vis.has(gid) && !newMight.hasAnyNotIn(vis)) continue;
+      const newMight = rowAt(depth + 1);
+      const fresh = BitSet.andInto(newMight, might, row ?? mightSee[gid], vis);
+      if (vis.has(gid) && !fresh) continue;
 
       if (++steps > budget) {
         truncated = true;
@@ -165,11 +172,17 @@ export function flowFromSource<D extends Dim>(geometry: Geometry<D>, graph: Port
         }
       }
 
-      vis.set(gid);
+      if (!vis.has(gid)) {
+        vis.set(gid);
+        if (!sourceMight.hasAnyNotIn(vis)) {
+          done = true;
+          return;
+        }
+      }
       onChain[gen.to] = 1;
       recurse(gen.to, src, g, newMight, depth + 1);
       onChain[gen.to] = 0;
-      if (truncated) return;
+      if (truncated || done) return;
     }
   };
 

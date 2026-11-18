@@ -82,6 +82,11 @@ Observations:
   word loop that returns "anything new".
 1e. **Source early-out**: stop a source as soon as `vis == mightSee[source]` (nothing left to
   find). Cheap word compare at each set.
+  **Status 1d + 1e: done (2026-11-18), always on (exact: identical results).** `BitSet.andInto`
+  (fused and + "anything new"), one row per depth in `flowFromSource`. Bench: same counters and
+  Σ everywhere; flow ms −10–17% (2D Pillar forest 9974 → 8628, 3D Pillar forest 2919 → 2610,
+  3D Grid city 858 → 723). 1e never fires on the bench levels (the last new bit is found on the
+  last useful step), kept since it costs one word loop per newly visible portal.
 1f. **Flat portal storage in workers** (SoA typed arrays for windings/planes, like
   `bsp/pack.ts`), so the hot loop reads numbers instead of objects. Only if the bench shows
   object access dominating.
