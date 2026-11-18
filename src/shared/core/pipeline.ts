@@ -96,9 +96,9 @@ export interface Compiler<D extends Dim, L> {
   compileWalls(walls: readonly Wall<D>[], options?: Partial<CompileOptions>, timings?: StageTiming[]): CompileResult<D>;
   /**
    * Like `compileLevel`, but the portal flow is delegated to `runFlow` and, if given, the BSP build
-   * to `runBsp` and the passage table to `runPassages` (e.g. a worker pool).
+   * to `runBsp`, the passage table to `runPassages` and base vis to `runBaseVis` (e.g. a worker pool).
    */
-  compileLevelAsync(level: L, options: Partial<CompileOptions>, runFlow: FlowRunner<D>, runBsp?: BspRunner<D>, runPassages?: PassageRunner<D>): Promise<CompileResult<D>>;
+  compileLevelAsync(level: L, options: Partial<CompileOptions>, runFlow: FlowRunner<D>, runBsp?: BspRunner<D>, runPassages?: PassageRunner<D>, runBaseVis?: BaseVisRunner<D>): Promise<CompileResult<D>>;
 }
 
 /** Runs the BSP stage with complete options; must return what `buildBsp` would. */
@@ -110,18 +110,27 @@ export type FlowRunner<D extends Dim> = (graph: PortalGraph<D>, mightSee: readon
 /** Builds the passage table (`baseVis: "passages"`) from base vis rows; must return what `computePassages` would. */
 export type PassageRunner<D extends Dim> = (graph: PortalGraph<D>, mightSee: readonly BitSet[]) => Promise<PassageTable>;
 
+/** Computes base vis rows; must return what `computeBaseVis` would. */
+export type BaseVisRunner<D extends Dim> = (graph: PortalGraph<D>) => Promise<readonly BitSet[]>;
+
 /** Binds the pipeline to one dimension. */
 export function createCompiler<D extends Dim, L>(config: CompilerConfig<D, L>): Compiler<D, L> {
   const g = config.geometry;
 
-  /** Stages up to base vis; `bsp` is the BSP stage's result (built by the caller, timed in `timings`). */
-  const throughBaseVis = (walls: readonly Wall<D>[], bsp: BspBuildResult<D>, timings: StageTiming[]) => {
+  /** Stages up to portals and leaks; `bsp` is the BSP stage's result (built by the caller, timed in `timings`). */
+  const throughPortals = (walls: readonly Wall<D>[], bsp: BspBuildResult<D>, timings: StageTiming[]) => {
     const { tree, stats: bspStats } = bsp;
     const surfaces = timed(timings, "surfaces", () => buildLeafSurfaces(g, tree, walls));
     const graph = timed(timings, "portals", () => config.buildPortalGraph(tree));
     const leaks = timed(timings, "leaks", () => detectLeaks(g, tree, graph));
-    const base = timed(timings, "base vis", () => computeBaseVis(g, graph));
-    return { walls, tree, bspStats, surfaces, graph, leaks, base };
+    return { walls, tree, bspStats, surfaces, graph, leaks };
+  };
+
+  /** Stages up to base vis, single-threaded. */
+  const throughBaseVis = (walls: readonly Wall<D>[], bsp: BspBuildResult<D>, timings: StageTiming[]) => {
+    const pre = throughPortals(walls, bsp, timings);
+    const base: readonly BitSet[] = timed(timings, "base vis", () => computeBaseVis(g, pre.graph));
+    return { ...pre, base };
   };
 
   /** Adds the flow's mightSee (tightened when a passage table is given) to the base-vis stages. */
@@ -168,7 +177,7 @@ export function createCompiler<D extends Dim, L>(config: CompilerConfig<D, L>): 
 
   const bspOptions = (opts: CompileOptions): BspBuildOptions => ({ ...config.bspDefaults, ...opts.bsp });
 
-  const compileLevelAsync = async (level: L, options: Partial<CompileOptions>, runFlow: FlowRunner<D>, runBsp?: BspRunner<D>, runPassages?: PassageRunner<D>): Promise<CompileResult<D>> => {
+  const compileLevelAsync = async (level: L, options: Partial<CompileOptions>, runFlow: FlowRunner<D>, runBsp?: BspRunner<D>, runPassages?: PassageRunner<D>, runBaseVis?: BaseVisRunner<D>): Promise<CompileResult<D>> => {
     const opts: CompileOptions = { ...DEFAULT_COMPILE_OPTIONS, ...options };
     const timings: StageTiming[] = [];
     const walls = timed(timings, "csg", () => config.levelWalls(level));
@@ -176,14 +185,17 @@ export function createCompiler<D extends Dim, L>(config: CompilerConfig<D, L>): 
     const tb = performance.now();
     const bsp = runBsp ? await runBsp(walls, bspOptions(opts)) : buildBsp(g, walls, bspOptions(opts));
     timings.push({ stage: "bsp", ms: performance.now() - tb });
-    let pre: ReturnType<typeof beforeFlow>;
-    if (opts.baseVis === "passages" && runPassages) {
-      const base = throughBaseVis(walls, bsp, timings);
+    const portals = throughPortals(walls, bsp, timings);
+    const tv = performance.now();
+    const base = { ...portals, base: runBaseVis ? await runBaseVis(portals.graph) : computeBaseVis(g, portals.graph) };
+    timings.push({ stage: "base vis", ms: performance.now() - tv });
+    let passages: PassageTable | null = null;
+    if (opts.baseVis === "passages") {
       const tp = performance.now();
-      const passages = await runPassages(base.graph, base.base);
+      passages = runPassages ? await runPassages(base.graph, base.base) : computePassages(g, base.graph, base.base);
       timings.push({ stage: "passage vis", ms: performance.now() - tp });
-      pre = withPassages(base, passages, timings);
-    } else pre = beforeFlow(walls, bsp, opts, timings);
+    }
+    const pre = withPassages(base, passages, timings);
     const t0 = performance.now();
     const flow = await runFlow(pre.graph, pre.mightSee, flowOptions(opts, pre));
     timings.push({ stage: "portal flow", ms: performance.now() - t0 });

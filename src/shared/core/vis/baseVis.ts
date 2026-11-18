@@ -85,16 +85,35 @@ export function portalMightSeePortal<D extends Dim>(g: Geometry<D>, graph: Porta
  */
 export function computeBaseVis<D extends Dim>(g: Geometry<D>, graph: PortalGraph<D>, useSpheres = true): BitSet[] {
   const n = graph.portals.length;
-  const spheres = useSpheres ? portalSpheres(g, graph) : null;
-  const result: BitSet[] = [];
-  const visitedLeaf = new Uint8Array(graph.leafCount);
-  for (let i = 0; i < n; i++) {
-    const candidate = new BitSet(n);
-    for (let j = 0; j < n; j++) if (portalMightSeePortal(g, graph, i, j, spheres)) candidate.set(j);
+  return baseVisFromWords(n, createBaseVisRows(g, graph, useSpheres)(0, n));
+}
 
-    // Flood through candidate portals starting from the leaf portal i leads into.
-    const reached = floodPortals(graph, graph.portals[i].to, candidate, visitedLeaf);
-    result.push(reached);
-  }
-  return result;
+/**
+ * Packed rows (`createBaseVisRows`) → one BitSet per portal, each owning its words: views into one
+ * buffer would each structured-clone the whole buffer when the result crosses to the editor.
+ */
+export function baseVisFromWords(n: number, words: Uint32Array): BitSet[] {
+  return BitSet.unpackRows(n, words).map((r) => r.clone());
+}
+
+/**
+ * A row builder for one graph (spheres and scratch set up once): `rows(p0, p1)` returns the
+ * mightSee rows of portals `[p0, p1)` packed as `BitSet.packRows` would (fresh array). Rows are
+ * independent, so workers can build ranges in parallel (`computeBaseVisParallel`).
+ */
+export function createBaseVisRows<D extends Dim>(g: Geometry<D>, graph: PortalGraph<D>, useSpheres = true): (p0: number, p1: number) => Uint32Array {
+  const n = graph.portals.length, wordsPerRow = (n + 31) >>> 5;
+  const spheres = useSpheres ? portalSpheres(g, graph) : null;
+  const visitedLeaf = new Uint8Array(graph.leafCount);
+  return (p0, p1) => {
+    const out = new Uint32Array((p1 - p0) * wordsPerRow);
+    const candidate = new BitSet(n);
+    for (let i = p0; i < p1; i++) {
+      candidate.words.fill(0);
+      for (let j = 0; j < n; j++) if (portalMightSeePortal(g, graph, i, j, spheres)) candidate.set(j);
+      // Flood through candidate portals starting from the leaf portal i leads into.
+      out.set(floodPortals(graph, graph.portals[i].to, candidate, visitedLeaf).words, (i - p0) * wordsPerRow);
+    }
+    return out;
+  };
 }

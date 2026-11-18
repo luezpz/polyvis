@@ -37,5 +37,5 @@ export const compileWalls = (walls: readonly Wall[], options: Partial<shared.Com
  * Like `compileLevel`, but the portal flow runs through `runFlow` and, if given, the BSP build
  * through `runBsp` and the passage table through `runPassages` (the editor's worker pool).
  */
-export const compileLevelAsync = (level: Level, options: Partial<shared.CompileOptions>, runFlow: shared.FlowRunner<Dim3>, runBsp?: shared.BspRunner<Dim3>, runPassages?: shared.PassageRunner<Dim3>): Promise<CompileResult> =>
-  compiler.compileLevelAsync(level, options, runFlow, runBsp, runPassages);
+export const compileLevelAsync = (level: Level, options: Partial<shared.CompileOptions>, runFlow: shared.FlowRunner<Dim3>, runBsp?: shared.BspRunner<Dim3>, runPassages?: shared.PassageRunner<Dim3>, runBaseVis?: shared.BaseVisRunner<Dim3>): Promise<CompileResult> =>
+  compiler.compileLevelAsync(level, options, runFlow, runBsp, runPassages, runBaseVis);

@@ -1,7 +1,8 @@
-/** Web Worker running the (DOM-free) 3D compiler, so the editor stays responsive; the BSP build, passage table and portal flow fan out to nested pool workers. */
+/** Web Worker running the (DOM-free) 3D compiler, so the editor stays responsive; the BSP build, base vis, passage table and portal flow fan out to nested pool workers. */
 
 import { type Level, compileLevelAsync } from "../../core";
 import { geometry3 } from "../../core/geometry";
+import { createParallelBaseVisRunner } from "../../../shared/app/compile/baseVisPool";
 import { createParallelBspRunner } from "../../../shared/app/compile/bspPool";
 import { createParallelFlowRunner } from "../../../shared/app/compile/flowPool";
 import { createParallelPassageRunner } from "../../../shared/app/compile/passagePool";
@@ -13,5 +14,6 @@ const pool = new WorkerPool(() => new Worker(new URL("./poolWorker.ts", import.m
 const runFlow = createParallelFlowRunner(geometry3, pool);
 const runBsp = createParallelBspRunner(geometry3, pool);
 const runPassages = createParallelPassageRunner(geometry3, pool);
+const runBaseVis = createParallelBaseVisRunner(geometry3, pool);
 
-serveCompiler((level: Level, options) => compileLevelAsync(level, options, runFlow, runBsp, runPassages));
+serveCompiler((level: Level, options) => compileLevelAsync(level, options, runFlow, runBsp, runPassages, runBaseVis));

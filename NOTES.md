@@ -35,8 +35,16 @@ only decisions, gotchas and open items. The 2D/3D merge (former PLAN.md / PROGRE
   than the build; workers keep big nodes' fragments and re-derive children by partition.
   Measured with Node threads, 4271 walls (300-room `randomLevel`): 514 -> 335 ms with 4 threads,
   worse with 8+ (serial setup ~75 ms, top walk); so capped at 4 (`bspPool.ts`), used from 300
-  walls. BSP is only ~1-2% of a big compile; base vis (single-threaded) dominates there.
-  Editors share one nested pool (`shared/app/compile/workerPool.ts`, entry `poolWorker.ts`).
+  walls. BSP is only ~1-2% of a big compile; base vis dominates there.
+- Parallel base vis (`shared/core/vis/parallelBaseVis.ts`, app `baseVisPool.ts`) is exact: rows
+  are independent (`createBaseVisRows`), equal-size portal ranges, 8 chunks per worker, packed
+  graph in, packed rows back. Threads = n² / `MIN_PAIRS_PER_THREAD` (250 k); under 200 portals,
+  one thread. Node threads (`npm run bench -- --threads n --repeat 4`), base vis ms 1 → 4 → 8
+  threads: 2D Maze 16x16 983 → 359 → 290, 2D Grid city 238 → 75 → 69, 3D Grid city 636 → 262 →
+  164, 3D Pillar forest 175 → 81 → 72; levels under ~550 portals unchanged (stay local).
+  Rows are copied out of the packed buffer (`baseVisFromWords`): views would each clone the
+  whole buffer when the result is posted to the editor.
+- Editors share one nested pool (`shared/app/compile/workerPool.ts`, entry `poolWorker.ts`).
 - Levels: `SAMPLE_LEVELS` (basic, used by every test suite) vs `DEMO_LEVELS` (`level/demos.ts`,
   grouped Heavy / Worst case / Edge case; only the cheap ones are tested, in `tests/d*/demos.test.ts`).
   Editors list `ALL_LEVELS` via `levelSelect` (optgroups). Writing helpers live in `level/builder.ts`;
@@ -80,9 +88,7 @@ only decisions, gotchas and open items. The 2D/3D merge (former PLAN.md / PROGRE
 - Parallel flow and parallel BSP never run in a browser by an agent: confirm nested workers
   start, and measure the speed-up on a big 3D level (console.debug logs ready-source counts);
   tune `MAX_BATCH` / `MIN_PARALLEL_PORTALS` / `MIN_PARALLEL_WALLS` / `MAX_BSP_THREADS`.
-- Base vis (`computeBaseVis`) is the biggest stage on large levels (118 s vs 2.7 s BSP at 300
-  rooms, measured before phase 1a made it 2–2.5× faster) and is still single-threaded: the next
-  parallelization target (rows are independent).
+- Parallel base vis never run in a browser: confirm the speed-up there (Node numbers in Decisions).
 - Open decision: merge the two editor shells (panel/app) further, or keep sharing helpers only.
 - PAS (Potentially Audible Set) baking
 - Convex hulls generation (for physics engines, navmesh, etc.)

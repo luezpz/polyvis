@@ -1,16 +1,18 @@
 /**
  * Worker side of the pool protocols: one {@link createFlowSession}, one
- * {@link createBspSession} and one passage row builder per run, answering flow, BSP and passage requests. Each
+ * {@link createBspSession}, one passage and one base vis row builder per run, answering flow, BSP,
+ * passage and base vis requests. Each
  * dimension's pool worker entry is one call to this with its geometry.
  */
 
-import { type Dim, type Geometry, type PortalGraph, type RemoteTask, createBspSession, createFlowSession, createPassageSession } from "../../core";
+import { type Dim, type Geometry, type PortalGraph, type RemoteTask, createBspSession, createFlowSession, createPassageSession, createBaseVisSession } from "../../core";
 import type { BspRequest, BspResponse } from "./bspProtocol";
 import { type FlowRequest, type FlowResponse, toBitSet } from "./flowProtocol";
 import type { PassageRequest, PassageResponse } from "./passageProtocol";
+import type { BaseVisRequest, BaseVisResponse } from "./baseVisProtocol";
 
-type Request = FlowRequest | BspRequest | PassageRequest;
-type Response = FlowResponse | BspResponse | PassageResponse;
+type Request = FlowRequest | BspRequest | PassageRequest | BaseVisRequest;
+type Response = FlowResponse | BspResponse | PassageResponse | BaseVisResponse;
 
 /** Installs the message handler on the worker global scope. */
 export function servePool<D extends Dim>(geometry: Geometry<D>): void {
@@ -21,6 +23,7 @@ export function servePool<D extends Dim>(geometry: Geometry<D>): void {
   let flow: ReturnType<typeof createFlowSession<D>> | null = null;
   let bsp: ReturnType<typeof createBspSession<D>> | null = null;
   let passageRows: ((p0: number, p1: number) => Uint32Array) | null = null;
+  let baseVisRows: ((p0: number, p1: number) => Uint32Array) | null = null;
 
   const answer = (req: Request): Response => {
     switch (req.type) {
@@ -39,6 +42,12 @@ export function servePool<D extends Dim>(geometry: Geometry<D>): void {
       case "passage-rows":
         if (!passageRows) throw new Error("passage rows before begin");
         return { id: req.id, words: passageRows(req.p0, req.p1) };
+      case "basevis-begin":
+        baseVisRows = createBaseVisSession(geometry, req.graph);
+        return { id: req.id, ok: true };
+      case "basevis-rows":
+        if (!baseVisRows) throw new Error("base vis rows before begin");
+        return { id: req.id, words: baseVisRows(req.p0, req.p1) };
       case "bsp-begin":
         bsp = createBspSession(geometry, req.walls, req.opts);
         return { id: req.id, ok: true };
@@ -54,7 +63,7 @@ export function servePool<D extends Dim>(geometry: Geometry<D>): void {
   scope.onmessage = (e) => {
     try {
       const res = answer(e.data);
-      // Passage rows are fresh arrays the worker never reads again: transfer instead of copying.
+      // Passage and base vis rows are fresh arrays the worker never reads again: transfer instead of copying.
       scope.postMessage(res, "words" in res ? [res.words.buffer] : []);
     } catch (err) {
       scope.postMessage({ id: e.data.id, error: err instanceof Error ? err.message : String(err) });
