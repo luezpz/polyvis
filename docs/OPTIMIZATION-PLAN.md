@@ -146,8 +146,11 @@ Observations:
   sphere branch in `portalMightSeePortal` (`computeBaseVis(g, graph, useSpheres = true)`); no new
   `Geometry` op (computed via `facetPoints`/`coords`/`vecAt`). Same Σ mightSee; base vis ms:
   2D Maze 16×16 2455 → 1113, 2D Pillar forest 1830 → 717, 3D Grid city 1077 → 676, 3D Pillar
-  forest 357 → 170. Flow half (sphere test before `clipFacet`) not done: step 1 almost never
-  rejects (phase 0), so gain is doubtful; measure first.
+  forest 357 → 170. Flow half **measured 2026-11-19: no payoff, closed.** Sphere verdict before
+  the step 1 and step 2 `clip` in `flatFlow.ts` (exact: −n / 0 / clip from `d ∓ r` vs ε, spheres
+  added to the cached `FlatPortals`): identical counters, flow ms within noise (2D Pillar forest
+  ~167–174 → ~170–180, 3D ~272 → ~271). A flat 2D clip is two dot products, the same cost as the
+  test; in 3D steps 3–4 dominate. Reverted.
 1b. **Separator caching** (q3map2 `stack->seperators`).
   - Separators of (source, pass) depend only on the frame, not the generator. Build once per
     recursion frame, then clip each generator against the list.
@@ -163,7 +166,11 @@ Observations:
   counters and Σ; flow ms vs 1d/1e: 2D Pillar forest 8628 → 7403, 2D Oblique lattice 3172 → 2447,
   2D Grid city 361 → 288; 3D only ~2–8% (3D Pillar forest 2610 → 2571, Grid city 723 → 663): the
   3D lazy separator walk already stops early, and step 4 (per generator, not cacheable) remains.
-1c. **Winding pooling** (Q1 stack windings): only if the bench shows GC time. Deferred.
+1c. **Winding pooling** (Q1 stack windings): only if the bench shows GC time.
+  **Status: measured 2026-11-19, closed (no GC to remove).** `node --trace-gc scripts/bench.mjs --all`:
+  ~55 ms GC in total (64 scavenges, 2 mark-compacts, each < 1 ms) over ~3 s wall, bundling included.
+  The flow already allocates no windings per step: 6b's flat walk keeps clipped facets and cached
+  separators on per-source `Float64Array` stacks, which is the pooling Q1 does.
 1d. **Allocation-free bitsets in the flow.** `might.and(...)` allocates a BitSet per step:
   use one preallocated row per recursion depth, and fuse `and` + `hasAnyNotIn(vis)` into one
   word loop that returns "anything new".
@@ -186,7 +193,7 @@ Observations:
 (portals, Σ mightSee, steps, clips, Σ portalVis, Σ pvs; 3D Oblique lattice still truncates at the
 same step).
 
-Left open, bench-driven: 1a flow half, 1c, 1f, 1g. The 3D flow is now dominated by step 4
+Left open, bench-driven: 1a flow half (since closed: no payoff), 1c (since closed: no GC time), 1f, 1g. The 3D flow is now dominated by step 4
 (per-generator reverse antipenumbra) and by step count: phase 2a is next.
 
 ## Phase 2: tighter base vis (q3map2 passage vis)
@@ -567,8 +574,8 @@ Doors must block vis when closed, without rebaking.
 | 6c bench through a bundle (done 2026-11-19) | S | `npm run bench` bundles (Vite/Rolldown SSR build, `scripts/benchBundle.mjs`) then runs it; `--runner` = old path. Counters identical; totals: 3D Maze 101 → 63, 3D Grid city 70 → 42, 2D Oblique lattice 130 → 100 ms (mostly BSP); flow within noise (hot loops already bind imports locally) |
 | 4 runtime coherence (done 2026-11-19, exact) | S | `createVisCache`: a repeated query / static light hits in ~1.5–3 µs vs 5–120 µs fresh (planes cam, `--runtime` "hit" column); a moving camera misses (see below) |
 | 3d hint faces: per-face split bias (done 2026-11-19, opt-in) | S–M | Pillar forest with hinted row faces: 3D total 314 → 48 ms, portals 578 → 252, Σ pvs 4.7× lower at ~same leaves; OBJ `hint_` open |
-| 1a flow half (sphere test before `clipFacet`) | S | doubtful: step 1 almost never rejects |
-| 1c winding pooling | S | only if the profile shows GC time |
+| 1a flow half (measured 2026-11-19: no payoff, closed) | S | sphere verdict before steps 1–2 clips: identical results, flow ms within noise; reverted |
+| 1c winding pooling (measured 2026-11-19: closed) | S | GC ~55 ms of ~3 s for `bench --all`; 6b arena already pools the flow windings |
 | 5 WASM/SIMD antipenumbra clip | L | only if 1f shows the arithmetic is the ceiling |
 
 **Runtime coherence (2026-11-19).** `runtime/cache.ts` `createVisCache(graph, tree)` (bound per dimension):
