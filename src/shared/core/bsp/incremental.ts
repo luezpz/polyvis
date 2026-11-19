@@ -86,7 +86,9 @@ export function buildBspIncremental<D extends Dim>(g: Geometry<D>, walls: readon
     g.packFacet(f, packed);
     return exactKey(packed);
   };
-  const frags: IdFragment<D>[] = ctx.fragments.map((f) => ({ ...f, id: idOf(`w${planeKeys[f.plane]};${facetKey(f.winding)}`) }));
+  // A plane's bias steers every subtree that has it as a candidate, so it is part of its fragments' ids.
+  const biasKey = (p: number): string => (ctx.planeBias && ctx.planeBias[p] !== 0 ? `b${exactKey([ctx.planeBias[p]])};` : "");
+  const frags: IdFragment<D>[] = ctx.fragments.map((f) => ({ ...f, id: idOf(`w${planeKeys[f.plane]};${biasKey(f.plane)}${facetKey(f.winding)}`) }));
   let splitPlane = -1; // the plane `piece` splits by (set before each partition)
   const piece = (parent: IdFragment<D>, winding: Facet<D>, front: boolean): IdFragment<D> =>
     ({ winding, plane: parent.plane, id: idOf(`s${parent.id}/${planeIds[splitPlane]}${front ? "f" : "b"}`) });

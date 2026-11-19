@@ -21,11 +21,11 @@ export interface PackedSubtree<D extends Dim> {
   readonly refineSplitCount: number;
 }
 
-/** Walls as `count`, then per wall: normal (dimension numbers), `d`, `sourceId`, facet. */
+/** Walls as `count`, then per wall: normal (dimension numbers), `d`, `sourceId`, `splitBias` (0 = none), facet. */
 export function packWalls<D extends Dim>(g: Geometry<D>, walls: readonly Wall<D>[]): Float64Array {
   const out: number[] = [walls.length];
   for (const w of walls) {
-    out.push(...g.coords(w.plane.n), w.plane.d, w.sourceId);
+    out.push(...g.coords(w.plane.n), w.plane.d, w.sourceId, w.splitBias ?? 0);
     g.packFacet(w.winding, out);
   }
   return Float64Array.from(out);
@@ -40,8 +40,9 @@ export function unpackWalls<D extends Dim>(g: Geometry<D>, data: ArrayLike<numbe
     at += g.dimension;
     const plane = { n, d: data[at] };
     const sourceId = data[at + 1];
-    const [winding, next] = g.unpackFacet(data, at + 2);
-    walls[i] = { winding, plane, sourceId };
+    const splitBias = data[at + 2];
+    const [winding, next] = g.unpackFacet(data, at + 3);
+    walls[i] = splitBias ? { winding, plane, sourceId, splitBias } : { winding, plane, sourceId };
     at = next;
   }
   return walls;

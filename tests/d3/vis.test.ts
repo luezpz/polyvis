@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  compileLevel, compileWalls, locateLeaf, leafComponents, makeWall, lineOfSight, SAMPLE_LEVELS,
+  ALL_LEVELS, compileLevel, compileWalls, locateLeaf, withSplitBias, leafComponents, makeWall, lineOfSight, SAMPLE_LEVELS,
   exportPvsJson, exportPvsText, decodePvsRow, decodeLeafPvs, packRuntime, pvsRowOf, pvsTableSees, type Wall, type Level, type CompileOptions, type PvsDocument,
 } from "../../src/d3/core";
 import { BitSet } from "../../src/shared/core";
@@ -125,6 +125,13 @@ describe("PVS", () => {
     const levels = Array.from({ length: 10 }, (_, i) => randomLevel(100 + i, 7));
     const checked = checkConservative(levels, {}, 400, 99);
     expect(checked).toBeGreaterThan(500);
+  });
+
+  it("is never stricter than true line of sight with face split biases (phase 3d)", () => {
+    const r = rng(5);
+    const biased = (l: Level): Level => ({ ...l, brushes: l.brushes.map((b) => withSplitBias(b, b.planes.map(() => (r() < 0.4 ? Math.round(r() * 200 - 100) : 0)))) });
+    const levels = [ALL_LEVELS.find((l) => l.name === "Pillar forest (hint rows)")!.create(), ...[3, 8, 13].map((s) => biased(randomLevel(s, 7))), biased(SAMPLE_LEVELS[0].create())];
+    expect(checkConservative(levels, {}, 400, 31)).toBeGreaterThan(500);
   });
 
   it("is never stricter than true line of sight with refinement options", () => {

@@ -69,11 +69,11 @@ export function makeEmptySpaceTest(brushes: readonly Brush[]): EmptySpaceTest {
   return (p) => inside(rooms, p) && !inside(solids, p);
 }
 
-/** Creates a wall from a segment (empty space on the left). Returns null for degenerate segments. */
-export function makeWall(seg: Segment, sourceId = -1): Wall | null {
+/** Creates a wall from a segment (empty space on the left); `splitBias`: `Wall.splitBias` (0 = omitted). Null for degenerate segments. */
+export function makeWall(seg: Segment, sourceId = -1, splitBias = 0): Wall | null {
   const plane = lineFromPoints(seg.a, seg.b);
   if (!plane || distanceSq(seg.a, seg.b) < MIN_LENGTH_SQ) return null;
-  return { winding: seg, plane, sourceId };
+  return splitBias ? { winding: seg, plane, sourceId, splitBias } : { winding: seg, plane, sourceId };
 }
 
 /**
@@ -100,7 +100,7 @@ export function buildWalls(brushes: readonly Brush[]): Wall[] {
       // Only brushes whose box reaches the edge can cut it (hits lie on it; on-line vertices within PLANE_EPSILON).
       const near = bvhQueryBox(index.bvh, index.boxes, [Math.min(edge.a.x, edge.b.x), Math.min(edge.a.y, edge.b.y)], [Math.max(edge.a.x, edge.b.x), Math.max(edge.a.y, edge.b.y)], 2 * PLANE_EPSILON);
       for (const piece of fragmentEdge(edge, brush, near.map((j) => brushes[j]))) {
-        const wall = classifyPiece(piece, brush.id, isEmpty);
+        const wall = classifyPiece(piece, brush.id, isEmpty, brush.faceSplitBias?.[i] ?? 0);
         if (wall) pieces.push(wall);
       }
     }
@@ -144,27 +144,35 @@ function fragmentEdge(edge: Segment, owner: Brush, brushes: readonly Brush[]): S
 }
 
 /** Decides whether a piece separates empty from non-empty space, and orients it. */
-function classifyPiece(piece: Segment, brushId: number, isEmpty: EmptySpaceTest): Wall | null {
+function classifyPiece(piece: Segment, brushId: number, isEmpty: EmptySpaceTest, splitBias: number): Wall | null {
   if (distanceSq(piece.a, piece.b) < MIN_LENGTH_SQ) return null;
   const m = midpoint(piece.a, piece.b);
   const left = normalize(perpLeft(sub(piece.b, piece.a)));
   const emptyLeft = isEmpty(addScaled(m, left, PROBE_OFFSET));
   const emptyRight = isEmpty(addScaled(m, left, -PROBE_OFFSET));
   if (emptyLeft === emptyRight) return null;
-  return makeWall(emptyLeft ? piece : { a: piece.b, b: piece.a }, brushId);
+  return makeWall(emptyLeft ? piece : { a: piece.b, b: piece.a }, brushId, splitBias);
 }
 
 const quant = (v: number): number => Math.round(v / KEY_QUANTUM);
 const pointKey = (p: Vec2): string => `${quant(p.x)},${quant(p.y)}`;
 
+/** Lower of two split biases, 0 meaning "no vote" (see `Wall.splitBias`). */
+const minBias = (a: number, b: number): number => (a === 0 ? b : b === 0 ? a : Math.min(a, b));
+
+/** Drops identical walls; the kept one takes the lowest split bias of its duplicates (a vote survives dedupe). */
 function dedupe(walls: readonly Wall[]): Wall[] {
-  const seen = new Set<string>();
-  return walls.filter((w) => {
+  const kept = new Map<string, Wall>();
+  for (const w of walls) {
     const key = `${pointKey(w.winding.a)}>${pointKey(w.winding.b)}`;
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
+    const old = kept.get(key);
+    if (!old) kept.set(key, w);
+    else {
+      const bias = minBias(old.splitBias ?? 0, w.splitBias ?? 0);
+      if (bias !== (old.splitBias ?? 0)) kept.set(key, { ...old, splitBias: bias });
+    }
+  }
+  return [...kept.values()];
 }
 
 /** Welds chains of collinear, same-direction walls that touch end-to-start. */
@@ -184,12 +192,14 @@ function mergeCollinear(walls: readonly Wall[]): Wall[] {
     used[i] = 1;
     let a = walls[i].winding.a;
     let b = walls[i].winding.b;
+    let bias = walls[i].splitBias ?? 0;
     // Extend forward.
     for (let cur = i; ;) {
       const next = (byStart.get(pointKey(b)) ?? []).find((j) => !used[j] && collinear(cur, j));
       if (next === undefined) break;
       used[next] = 1;
       b = walls[next].winding.b;
+      bias = minBias(bias, walls[next].splitBias ?? 0);
       cur = next;
     }
     // Extend backward.
@@ -198,9 +208,10 @@ function mergeCollinear(walls: readonly Wall[]): Wall[] {
       if (prev === undefined) break;
       used[prev] = 1;
       a = walls[prev].winding.a;
+      bias = minBias(bias, walls[prev].splitBias ?? 0);
       cur = prev;
     }
-    const merged = makeWall({ a, b }, walls[i].sourceId);
+    const merged = makeWall({ a, b }, walls[i].sourceId, bias);
     if (merged) out.push(merged);
   }
   return out;

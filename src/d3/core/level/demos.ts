@@ -66,6 +66,18 @@ function pillarForest(w: number, h: number, pitch: number): BrushSpec[] {
   return specs;
 }
 
+/** Splitter bias of the pillar row faces in "Pillar forest (hint rows)": large enough to beat any split count. */
+const ROW_HINT = -1000;
+
+/**
+ * {@link pillarForest} with the pillars' −y / +y faces flagged as preferred splitters (phase 3d hint faces):
+ * the BSP cuts the hall along the pillar rows first, so leaves are row strips instead of slivers around
+ * each pillar.
+ */
+function hintedPillarForest(w: number, h: number, pitch: number): BrushSpec[] {
+  return pillarForest(w, h, pitch).map((s) => (s.kind === "solid" ? { ...s, faceSplitBias: [0, 0, ROW_HINT, ROW_HINT, 0, 0] } : s));
+}
+
 /** Back-and-forth corridor of `bands` runs (2 wide, 2.5 high): a deep, narrow portal chain. */
 function serpentine(bands: number, len: number): BrushSpec[] {
   const specs: BrushSpec[] = [];
@@ -112,6 +124,7 @@ export const DEMO_LEVELS: readonly SampleLevel[] = [
   { group: HEAVY, name: "Maze 10×10", description: "A perfect maze of 100 cells: many leaves, tiny PVS per leaf.", create: () => build(maze(10, 7)) },
   { group: HEAVY, name: "Tower", description: "8 storeys with central columns, joined by alternating ramp shafts.", create: () => build(tower(8)) },
   { group: HEAVY, name: "Pillar forest", description: "A 40×28 hall with ~65 staggered pillars: huge leaf count, everything partly visible.", create: () => build(pillarForest(40, 28, 4)) },
+  { group: HEAVY, name: "Pillar forest (hint rows)", description: "Pillar forest with the pillars' row faces (−y, +y) flagged as preferred BSP splitters (face split bias −1000): fewer portals, much faster flow.", create: () => build(hintedPillarForest(40, 28, 4)) },
   // ---- worst cases ----
   { group: WORST, name: "Serpentine", description: "A 14-band snake corridor: the deepest possible portal chains for the flow recursion.", create: () => build(serpentine(14, 30)) },
   { group: WORST, name: "Comb", description: "A corridor with 30 alcoves: every alcove sees most of the others through the corridor.", create: () => build(comb(15)) },

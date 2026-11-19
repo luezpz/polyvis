@@ -54,7 +54,7 @@ export function serializeLevel(level: Level): string {
   return JSON.stringify({
     format: level.format,
     version: level.version,
-    brushes: level.brushes.map((b) => ({ id: b.id, kind: b.kind, ...(b.detail ? { detail: true } : {}), ...(b.door ? { door: b.door } : {}), planes: b.planes.map((p) => [p.n.x, p.n.y, p.n.z, p.d]) })), // full precision: rounding planes moves vertices
+    brushes: level.brushes.map((b) => ({ id: b.id, kind: b.kind, ...(b.detail ? { detail: true } : {}), ...(b.door ? { door: b.door } : {}), ...(b.faceSplitBias ? { faceSplitBias: b.faceSplitBias } : {}), planes: b.planes.map((p) => [p.n.x, p.n.y, p.n.z, p.d]) })), // full precision: rounding planes moves vertices
     meshes: level.meshes.map((m) => ({ id: m.id, name: m.name, faces: m.faces.map((f) => f.map(p3)) })),
   }, null, 1);
 }
@@ -85,7 +85,11 @@ export function parseLevel(json: string): Level {
     if (id < 0 || seen.has(id)) id = Math.max(0, ...seen) + 1;
     seen.add(id);
     const brush = makeBrush(id, kind, planes);
-    if (brush) brushes.push(withFlags(brush, { detail: rb.detail === true, door: typeof rb.door === "string" ? rb.door : undefined }));
+    const bias = rb.faceSplitBias;
+    if (bias !== undefined && !(Array.isArray(bias) && bias.length === planes.length && bias.every((v) => typeof v === "number" && Number.isFinite(v)))) {
+      throw new Error(`Brush ${i}: faceSplitBias must be one finite number per plane`);
+    }
+    if (brush) brushes.push(withFlags(brush, { detail: rb.detail === true, door: typeof rb.door === "string" ? rb.door : undefined, faceSplitBias: bias as number[] | undefined, planes }));
   }
 
   const meshes: ImportedMesh[] = [];

@@ -3,7 +3,7 @@
  * which must agree bit for bit.
  */
 
-import type { BspBuildOptions } from "./build";
+import type { BspBuildOptions, BuildContext } from "./build";
 
 /** Nodes with fewer than 2× this many fragments score |front − back| exactly; see {@link balanceQuantum}. */
 const BALANCE_BUCKETS = 32;
@@ -21,10 +21,11 @@ export function balanceQuantum(n: number): number {
 
 /**
  * Splitter score (lower is better):
- *   splitWeight·splits + balanceWeight·q·⌊|front − back| / q⌋ − facingWeight·onPlane,
- * q = {@link balanceQuantum}(fragment count); `onPlane` = fragments consumed by the node.
+ *   splitWeight·splits + balanceWeight·q·⌊|front − back| / q⌋ − facingWeight·onPlane + bias,
+ * q = {@link balanceQuantum}(fragment count); `onPlane` = fragments consumed by the node;
+ * `bias` = the candidate plane's {@link BuildContext.planeBias} (phase 3d hint faces).
  */
-export function splitterScore(splits: number, front: number, back: number, onPlane: number, q: number, opts: BspBuildOptions): number {
+export function splitterScore(splits: number, front: number, back: number, onPlane: number, q: number, opts: BspBuildOptions, bias = 0): number {
   const imbalance = Math.abs(front - back);
-  return splits * opts.splitWeight + (q === 1 ? imbalance : Math.floor(imbalance / q) * q) * opts.balanceWeight - (opts.facingWeight ?? 0) * onPlane;
+  return splits * opts.splitWeight + (q === 1 ? imbalance : Math.floor(imbalance / q) * q) * opts.balanceWeight - (opts.facingWeight ?? 0) * onPlane + bias;
 }

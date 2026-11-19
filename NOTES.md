@@ -125,6 +125,10 @@ only decisions, gotchas and open items. The 2D/3D merge (former PLAN.md / PROGRE
   out; `findDoors` → `CompileResult.doors` (leaves, boundary portals, `seals` by flood). Runtime:
   `doorPortalOpen` / `closedDoorPortals`. Door faces show up in `detailWalls`. Parity gap: OBJ meshes
   can't be doors yet (`door_<name>` naming from the plan is open; brushes only, both dims).
+- Phase 3d hint faces = per-face splitter bias (`Brush.faceSplitBias` → `Wall.splitBias` → `BuildContext.planeBias`
+  → `splitterScore`), not extra hint brushes. A plane takes the lowest nonzero vote of its walls. Builder specs
+  give it in face order (3D box −x, +x, −y, +y, −z, +z; 2D box −y, +x, +y, −x); edits carry it by normal. No
+  editor UI and no OBJ `hint_` yet (deferred).
 - No PAS (decided 2026-11-19): it is a bake-time artifact (can't be rebuilt on map load) and adds little.
   Engines do sound on the portal graph instead (flood from the source leaf), using door portals
   (`DoorInfo.portals`) to attenuate or stop sound.
@@ -166,6 +170,8 @@ only decisions, gotchas and open items. The 2D/3D merge (former PLAN.md / PROGRE
 - Parallel base vis never run in a browser: confirm the speed-up there (Node numbers in Decisions).
 - Doors: OBJ `door_<name>` meshes (need a convex volume per mesh); door state in the export beyond the
   `closed` flag (door → portal list).
+- Hint faces: OBJ `hint_` material → `splitBias`; editor UI to set a face's bias; hints in open space
+  (non-solid splitter-only walls) if a level needs a cut no face lies on.
 - Open decision: merge the two editor shells (panel/app) further, or keep sharing helpers only.
 - Convex hulls generation (for physics engines, navmesh, etc.)
 - Lightmap baking

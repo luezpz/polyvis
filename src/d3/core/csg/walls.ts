@@ -74,12 +74,13 @@ export function makeEmptySpaceTest(brushes: readonly Brush[]): EmptySpaceTest {
 
 /**
  * Creates a wall from a winding (empty space in front). `known`: the wall's plane if exact (a brush
- * face's), else it is fitted to the winding. Returns null for degenerate windings.
+ * face's), else it is fitted to the winding. `splitBias`: `Wall.splitBias` (0 = omitted). Returns null for
+ * degenerate windings.
  */
-export function makeWall(winding: Winding, sourceId = -1, known?: Plane3): Wall | null {
+export function makeWall(winding: Winding, sourceId = -1, known?: Plane3, splitBias = 0): Wall | null {
   const plane = known ?? windingPlane(winding);
   if (!plane || windingArea(winding) < MIN_AREA) return null;
-  return { winding, plane, sourceId };
+  return splitBias ? { winding, plane, sourceId, splitBias } : { winding, plane, sourceId };
 }
 
 /**
@@ -100,7 +101,8 @@ export function buildWalls(brushes: readonly Brush[]): Wall[] {
   const pieces: Wall[] = [];
 
   for (const brush of brushes) {
-    for (const face of brush.faces) {
+    brush.faces.forEach((face, fi) => {
+      const bias = brush.faceSplitBias?.[fi] ?? 0;
       const { min, max } = windingAabb(face.winding);
       let fragments: Winding[] = [face.winding];
       // Same brushes, same (index) order as a full scan with `aabbOverlaps(faceBox, bounds, PROBE_OFFSET)`.
@@ -110,10 +112,10 @@ export function buildWalls(brushes: readonly Brush[]): Wall[] {
         fragments = fragments.flatMap((w) => fragmentByBrush(w, other));
       }
       for (const w of fragments) {
-        const wall = classifyPiece(w, face.plane, brush.id, isEmpty);
+        const wall = classifyPiece(w, face.plane, brush.id, isEmpty, bias);
         if (wall) pieces.push(wall);
       }
-    }
+    });
   }
   return dedupe(pieces);
 }
@@ -144,7 +146,7 @@ function fragmentByBrush(w: Winding, other: Brush): Winding[] {
 }
 
 /** Decides whether a piece separates empty from non-empty space, and orients it. */
-function classifyPiece(w: Winding, facePlane: Plane3, brushId: number, isEmpty: EmptySpaceTest): Wall | null {
+function classifyPiece(w: Winding, facePlane: Plane3, brushId: number, isEmpty: EmptySpaceTest, splitBias: number): Wall | null {
   if (windingArea(w) < MIN_AREA) return null;
   const c = windingCenter(w);
   const emptyFront = isEmpty(addScaled(c, facePlane.n, PROBE_OFFSET));
@@ -152,11 +154,13 @@ function classifyPiece(w: Winding, facePlane: Plane3, brushId: number, isEmpty: 
   if (emptyFront === emptyBack) return null;
   // The brush face's plane, not one refit to the piece: refitting adds noise that depends on how the
   // face was fragmented, so an edit elsewhere would change this wall's plane (stable BSP, phase 3.5).
-  return makeWall(emptyFront ? w : reverseWinding(w), brushId, emptyFront ? facePlane : flipPlane(facePlane));
+  return makeWall(emptyFront ? w : reverseWinding(w), brushId, emptyFront ? facePlane : flipPlane(facePlane), splitBias);
 }
 
 interface PlaneGroup {
   readonly plane: Plane3;
+  /** Lowest nonzero `splitBias` of the group's walls, kept or dropped (0: none). */
+  bias: number;
   readonly accepted: { readonly winding: Winding; readonly box: Aabb }[];
 }
 
@@ -166,13 +170,17 @@ interface PlaneGroup {
  * analogue of {@link fragmentByBrush} on the plane). Identical walls vanish;
  * overlapping leftovers of coincident brush faces that were fragmented
  * differently are trimmed, so every point of the boundary is covered once.
+ * Every output wall gets its group's lowest split bias, so a vote survives even when its wall was a duplicate.
  */
 function dedupe(walls: readonly Wall[]): Wall[] {
   const groups: PlaneGroup[] = [];
   const out: Wall[] = [];
+  const groupOf: PlaneGroup[] = [];
   for (const w of walls) {
     let group = groups.find((g) => sameOrientedPlane(g.plane, w.plane));
-    if (!group) groups.push((group = { plane: w.plane, accepted: [] }));
+    if (!group) groups.push((group = { plane: w.plane, bias: 0, accepted: [] }));
+    const b = w.splitBias ?? 0;
+    if (b !== 0 && (group.bias === 0 || b < group.bias)) group.bias = b;
 
     let pieces: Winding[] = [w.winding];
     const box = windingAabb(w.winding);
@@ -186,10 +194,11 @@ function dedupe(walls: readonly Wall[]): Wall[] {
       const piece = makeWall(p, w.sourceId, w.plane);
       if (!piece) continue;
       out.push(piece);
+      groupOf.push(group);
       group.accepted.push({ winding: p, box: windingAabb(p) });
     }
   }
-  return out;
+  return out.map((w, i) => (groupOf[i].bias === (w.splitBias ?? 0) ? w : { ...w, splitBias: groupOf[i].bias }));
 }
 
 /** The parts of `w` outside the convex region bounded by `inward` planes (coplanar difference). */

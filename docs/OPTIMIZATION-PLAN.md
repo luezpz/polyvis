@@ -284,7 +284,24 @@ Left open, bench-driven: 1a flow half, 1c, 1f, 1g. The 3D flow is now dominated 
   10×10 151 × 905 → 151 × 151, 3D Comb 32 × 187 → 32 × 32. Bench prints `leaves | pvs rows |
   pvs columns`. Not yet in the export (it still writes wide rows): a next-version layout with
   `leafColumn` per leaf is the open step.
-3d. **Hint walls** (`hint_` material/brush): split planes that are never solid.
+3d. **Hint faces: per-face split bias** (reworked 2026-11-19 from "hint walls"; OBJ `hint_` deferred).
+  **Status: done (2026-11-19), both dims, opt-in per face (no bias = same trees).** Instead of extra
+  non-solid hint brushes, any brush/room face can carry a splitter bias: `Brush.faceSplitBias[i]`
+  (3D: per face / plane; 2D: per edge `vertices[i] → [i+1]`) → CSG copies it to the face's walls as
+  `Wall.splitBias` → `prepareBuild` gives each interned plane the **lowest** nonzero vote of its walls
+  (`BuildContext.planeBias`; null if no votes) → `splitterScore(...) + bias`. Units are "wall fragments
+  split": negative = prefer the plane as splitter, positive = avoid it. Lowest wins so one hinted face on
+  a shared plane (a common floor) is enough; avoiding needs every voting face. Exact in all build paths
+  (sweep, early-out bound, parallel workers via `packWalls`, incremental: the plane's bias is in its
+  fragments' ids). CSG dedupe keeps the lowest vote of coincident faces. Bias carries across geometry
+  edits by matching face normal / edge direction, and is saved in level JSON (`faceSplitBias`). Visibility
+  rules are untouched, so the PVS is conservative for any bias (tested). Not done: hints in open space
+  (true Quake hint brushes, need non-solid splitter-only walls), editor UI, OBJ `hint_` material.
+  Bench, new demo "Pillar forest (hint rows)" (pillar ±y faces at −1000, i.e. cut along the rows first),
+  plain → hinted: 3D portals 578 → 252, Σ mightSee 79736 → 13350, flow 269 → 29 ms, total 314 → 48 ms,
+  leaves 300 → 295, Σ pvs 16296 → 3470 (≈ same leaf count, so a real 4.7× tighter PVS), pvs rows 121 → 65;
+  2D portals 1260 → 560, flow 169 → 27 ms, total 245 → 49 ms, leaves 459 → 321, Σ pvs 71236 → 13022.
+  Other levels: counters identical.
 3e. **Lossless leaf merging**: after the BSP, merge two empty leaves sharing a portal when
   their union is convex (exact: no vis is lost). Fewer leaves and portals for the flow.
   **Status: done as option `cluster: "convex"` (2026-11-18), default `"none"`. Not lossless.**
@@ -549,7 +566,7 @@ Doors must block vis when closed, without rebaking.
 | 1f / 6b flat flow (done 2026-11-19, exact) | M | flow ms: 2D Pillar forest 405 → 150, 2D Oblique lattice 190 → 71, 3D Pillar forest 419 → 319, 3D Maze 9 → 11 (noise); totals 2D Pillar forest 579 → 206, 3D 498 → 359 |
 | 6c bench through a bundle (done 2026-11-19) | S | `npm run bench` bundles (Vite/Rolldown SSR build, `scripts/benchBundle.mjs`) then runs it; `--runner` = old path. Counters identical; totals: 3D Maze 101 → 63, 3D Grid city 70 → 42, 2D Oblique lattice 130 → 100 ms (mostly BSP); flow within noise (hot loops already bind imports locally) |
 | 4 runtime coherence (done 2026-11-19, exact) | S | `createVisCache`: a repeated query / static light hits in ~1.5–3 µs vs 5–120 µs fresh (planes cam, `--runtime` "hit" column); a moving camera misses (see below) |
-| 3d hint walls (`hint_` material in the OBJ) | S–M | tighter PVS and faster flow on open levels, placed in Blender |
+| 3d hint faces: per-face split bias (done 2026-11-19, opt-in) | S–M | Pillar forest with hinted row faces: 3D total 314 → 48 ms, portals 578 → 252, Σ pvs 4.7× lower at ~same leaves; OBJ `hint_` open |
 | 1a flow half (sphere test before `clipFacet`) | S | doubtful: step 1 almost never rejects |
 | 1c winding pooling | S | only if the profile shows GC time |
 | 5 WASM/SIMD antipenumbra clip | L | only if 1f shows the arithmetic is the ceiling |

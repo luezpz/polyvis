@@ -28,15 +28,16 @@ export const SWEEP_MIN_GROUP = 4;
 /**
  * Exact scores (see `scoreSplitters`) of the candidates sharing a normal with at least
  * {@link SWEEP_MIN_GROUP} − 1 others. `candidates`: plane indices into `planes`.
+ * `bias`: per-plane score offset (`BuildContext.planeBias`; null = none).
  * Returns plane index → score; candidates not in a large group are absent.
  */
-export function sweepScores<D extends Dim>(g: Geometry<D>, frags: readonly Fragment<D>[], candidates: readonly number[], planes: readonly Plane<D>[], opts: BspBuildOptions): Map<number, number> {
+export function sweepScores<D extends Dim>(g: Geometry<D>, frags: readonly Fragment<D>[], candidates: readonly number[], planes: readonly Plane<D>[], opts: BspBuildOptions, bias: ArrayLike<number> | null = null): Map<number, number> {
   const scores = new Map<number, number>();
   const groups = groupByNormal(g, candidates, planes);
   if (groups.length === 0) return scores;
   const byPlane = new Map<number, number[]>();
   frags.forEach((f, i) => { const list = byPlane.get(f.plane); if (list) list.push(i); else byPlane.set(f.plane, [i]); });
-  for (const group of groups) scoreGroup(g, frags, group, planes, opts, byPlane, scores);
+  for (const group of groups) scoreGroup(g, frags, group, planes, opts, byPlane, scores, bias);
   return scores;
 }
 
@@ -81,7 +82,7 @@ function firstTrue(xs: Float64Array, pred: (x: number) => boolean): number {
  */
 function scoreGroup<D extends Dim>(
   g: Geometry<D>, frags: readonly Fragment<D>[], group: NormalGroup<D["vec"]>, planes: readonly Plane<D>[],
-  opts: BspBuildOptions, byPlane: ReadonlyMap<number, readonly number[]>, scores: Map<number, number>,
+  opts: BspBuildOptions, byPlane: ReadonlyMap<number, readonly number[]>, scores: Map<number, number>, bias: ArrayLike<number> | null,
 ): void {
   const eps = PLANE_EPSILON;
   const count = frags.length;
@@ -134,6 +135,6 @@ function scoreGroup<D extends Dim>(
     }
     const nFront = flipped ? anyBack : anyFront;
     const nBack = (flipped ? anyFront : anyBack) + onOpposite;
-    scores.set(c, splitterScore(splits, nFront, nBack, facing ? own.length : 0, q, opts));
+    scores.set(c, splitterScore(splits, nFront, nBack, facing ? own.length : 0, q, opts, bias ? bias[c] : 0));
   });
 }

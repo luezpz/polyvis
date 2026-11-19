@@ -42,11 +42,11 @@ function checkTree<D extends Dim>(g: Geometry<D>, walls: readonly Wall<D>[], opt
     const candidates = splitCandidates(frags, ctx.planeRank);
     const swept = sweepScores(g, frags, candidates, planes, opts);
     for (const [c, score] of swept) {
-      expect(score, `candidate ${c}`).toBe(scoreSplitters(g, frags, [c], planes, opts, false).score);
+      expect(score, `candidate ${c}`).toBe(scoreSplitters(g, frags, [c], planes, opts, null, false).score);
       compared++;
     }
     const best = scoreSplitters(g, frags, candidates, planes, opts);
-    expect(best).toEqual(scoreSplitters(g, frags, candidates, planes, opts, false));
+    expect(best).toEqual(scoreSplitters(g, frags, candidates, planes, opts, null, false));
     const part = partition(g, frags, best.plane, planes);
     visit(part.front);
     visit(part.back);

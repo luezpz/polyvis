@@ -98,7 +98,7 @@ export function createBspSession<D extends Dim>(g: Geometry<D>, walls: Float64Ar
     score(source: FragmentSource, candidates: readonly number[]): SplitChoice {
       const f = resolve(source);
       frags.set(source.key, f);
-      return candidates.length > 0 ? scoreSplitters(g, f, candidates, ctx.planes, opts) : { plane: -1, score: Infinity };
+      return candidates.length > 0 ? scoreSplitters(g, f, candidates, ctx.planes, opts, ctx.planeBias) : { plane: -1, score: Infinity };
     },
     subtree(task: RemoteTask<D>): PackedSubtree<D> {
       const t: SubtreeTask<D> = task.kind === "walls" ? { kind: "walls", frags: resolve(task.source), region: task.region, depth: task.depth } : task;

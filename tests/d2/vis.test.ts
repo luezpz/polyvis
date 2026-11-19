@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  compileLevel, compileWalls, locateLeaf, leafComponents, makeWall, lineOfSight, castRay, SAMPLE_LEVELS,
+  ALL_LEVELS, compileLevel, compileWalls, locateLeaf, withSplitBias, leafComponents, makeWall, lineOfSight, castRay, SAMPLE_LEVELS,
   exportPvsJson, exportPvsText, decodePvsRow, decodeLeafPvs, packRuntime, pvsRowOf, pvsTableSees, type Wall, type Level, type PvsDocument,
 } from "../../src/d2/core";
 import { BitSet } from "../../src/shared/core";
@@ -73,6 +73,28 @@ describe("PVS", () => {
     const leaves = emptyLeaves(r);
     expect(leaves.some((a) => leaves.some((b) => !r.pvs[a].has(b)))).toBe(true);
     expect(r.summary.averageVisibleFraction).toBeLessThan(compileLevel(SAMPLE_LEVELS.find((s) => s.name === "Two rooms")!.create(), { bsp: { cornerSplits: false } }).summary.averageVisibleFraction);
+  });
+
+  it("is never stricter than true line of sight with face split biases (phase 3d)", () => {
+    const r0 = rng(5);
+    const biased = (l: Level): Level => ({ ...l, brushes: l.brushes.map((b) => withSplitBias(b, b.vertices.map(() => (r0() < 0.4 ? Math.round(r0() * 200 - 100) : 0)))) });
+    const levels = [ALL_LEVELS.find((l) => l.name === "Pillar forest (hint rows)")!.create(), ...[3, 8, 13].map((s) => biased(randomLevel(s, 10))), biased(SAMPLE_LEVELS[0].create())];
+    const rand = rng(31);
+    let checked = 0;
+    for (const level of levels) {
+      const r = compileLevel(level);
+      const leaves = emptyLeaves(r);
+      for (let k = 0; k < 400; k++) {
+        const a = leaves[Math.floor(rand() * leaves.length)];
+        const b = leaves[Math.floor(rand() * leaves.length)];
+        const p = randomPointInLeaf(r, a, rand);
+        const q = randomPointInLeaf(r, b, rand);
+        if (!p || !q || !lineOfSight(r.walls, p, q)) continue;
+        checked++;
+        expect(r.pvs[a].has(b), `leaf ${a} should see leaf ${b}`).toBe(true);
+      }
+    }
+    expect(checked).toBeGreaterThan(500);
   });
 
   it("is never stricter than true line of sight with refinement options", () => {

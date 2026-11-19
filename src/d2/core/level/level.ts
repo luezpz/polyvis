@@ -36,6 +36,12 @@ export interface Brush {
    * while the door named so is shut. Brushes sharing a name form one door. Absent = not a door.
    */
   readonly door?: string;
+  /**
+   * Splitter bias per edge (phase 3d hint faces), `faceSplitBias[i]` for the edge `vertices[i] → vertices[i+1]`:
+   * copied to the edge's walls as `Wall.splitBias` (negative = the BSP prefers that line as a splitter,
+   * positive = avoids it, 0 = no vote; units of wall fragments split). Absent = all 0.
+   */
+  readonly faceSplitBias?: readonly number[];
 }
 
 export const LEVEL_FORMAT = "polyvis-level-2d";
@@ -108,9 +114,43 @@ export function withDoor<B extends { readonly door?: string }>(brush: B, door: s
   return (door ? { ...rest, door } : rest) as B;
 }
 
-/** `to` with the detail flag and door name of `from` (keeps flags across geometry edits). */
-export const withFlags = <B extends { readonly detail?: boolean; readonly door?: string }>(to: B, from: { readonly detail?: boolean; readonly door?: string }): B =>
-  withDoor(withDetail(to, from.detail), from.door);
+/** `brush` with `faceSplitBias` set to `bias` (padded / cut to the edge count; omitted when all 0 or not finite). */
+export function withSplitBias<B extends { readonly vertices: readonly Vec2[]; readonly faceSplitBias?: readonly number[] }>(brush: B, bias: readonly number[] | undefined): B {
+  const { faceSplitBias: _old, ...rest } = brush;
+  const values = brush.vertices.map((_, i) => (Number.isFinite(bias?.[i]) ? bias![i] : 0));
+  return (values.some((v) => v !== 0) ? { ...rest, faceSplitBias: values } : rest) as B;
+}
+
+/** Source of brush flags: a brush, a builder spec or parsed JSON. */
+export interface BrushFlags {
+  readonly detail?: boolean;
+  readonly door?: string;
+  /** Per-edge bias; matched to the target's edges by direction if `vertices` is given, else by position. */
+  readonly faceSplitBias?: readonly number[];
+  readonly vertices?: readonly Vec2[];
+}
+
+/** Unit inward normals of a CCW loop's edges (null for degenerate edges). */
+const edgeNormals = (vs: readonly Vec2[]): (Vec2 | null)[] => vs.map((a, i) => lineFromPoints(a, vs[(i + 1) % vs.length])?.n ?? null);
+
+/**
+ * `faceSplitBias` of `from` re-indexed for the edges of `to`: by equal direction when `from` has vertices
+ * (geometry edits keep edge directions but may drop or rotate edges), else by position.
+ */
+function carriedSplitBias(to: readonly Vec2[], from: BrushFlags): readonly number[] | undefined {
+  const src = from.faceSplitBias;
+  if (!src || !src.some((v) => v !== 0)) return undefined;
+  if (!from.vertices) return src;
+  const old = edgeNormals(from.vertices);
+  return edgeNormals(to).map((n) => {
+    const j = n ? old.findIndex((m) => m !== null && m.x * n.x + m.y * n.y > 1 - 1e-9) : -1;
+    return j >= 0 ? src[j] ?? 0 : 0;
+  });
+}
+
+/** `to` with the detail flag, door name and edge split biases of `from` (keeps flags across geometry edits). */
+export const withFlags = <B extends { readonly vertices: readonly Vec2[]; readonly detail?: boolean; readonly door?: string; readonly faceSplitBias?: readonly number[] }>(to: B, from: BrushFlags): B =>
+  withSplitBias(withDoor(withDetail(to, from.detail), from.door), carriedSplitBias(to.vertices, from));
 
 /** True if the brush takes part in the BSP: every room, and solids that are neither detail nor doors. */
 export const isStructural = (b: { readonly kind: string; readonly detail?: boolean; readonly door?: string }): boolean => b.kind === "room" || (!b.detail && !b.door);
@@ -147,7 +187,11 @@ export function parseLevel(json: string): Level {
     if (id < 0 || seen.has(id)) id = Math.max(0, ...seen) + 1;
     seen.add(id);
     const brush = makeBrush(id, kind, pts);
-    if (brush) brushes.push(withFlags(brush, { detail: rb.detail === true, door: typeof rb.door === "string" ? rb.door : undefined }));
+    const bias = rb.faceSplitBias;
+    if (bias !== undefined && !(Array.isArray(bias) && bias.length === pts.length && bias.every((v) => typeof v === "number" && Number.isFinite(v)))) {
+      throw new Error(`Brush ${i}: faceSplitBias must be one finite number per edge`);
+    }
+    if (brush) brushes.push(withFlags(brush, { detail: rb.detail === true, door: typeof rb.door === "string" ? rb.door : undefined, faceSplitBias: bias as number[] | undefined, vertices: pts }));
   }
   return { format: LEVEL_FORMAT, version: LEVEL_VERSION, brushes };
 }

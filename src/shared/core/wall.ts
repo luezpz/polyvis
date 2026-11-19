@@ -10,4 +10,11 @@ export interface Wall<D extends Dim> {
   readonly plane: Plane<D>;
   /** Brush (or imported mesh, negated) that contributed this wall, for debugging/highlighting; -1 if unknown. */
   readonly sourceId: number;
+  /**
+   * Splitter bias (phase 3d, hint faces), in units of "wall fragments split": added to the BSP score of
+   * this wall's plane, so negative = prefer it as a splitter, positive = avoid it. Absent / 0: no vote.
+   * A plane takes the lowest bias among the walls on it that vote (see `prepareBuild`). Changes the tree
+   * only, never visibility rules: the PVS stays conservative for any tree.
+   */
+  readonly splitBias?: number;
 }

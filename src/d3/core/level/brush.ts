@@ -44,6 +44,12 @@ export interface Brush {
    * while the door named so is shut. Brushes sharing a name form one door. Absent = not a door.
    */
   readonly door?: string;
+  /**
+   * Splitter bias per face (phase 3d hint faces), `faceSplitBias[i]` for `faces[i]` / `planes[i]`: copied
+   * to the face's walls as `Wall.splitBias` (negative = the BSP prefers that plane as a splitter,
+   * positive = avoids it, 0 = no vote; units of wall fragments split). Absent = all 0.
+   */
+  readonly faceSplitBias?: readonly number[];
 }
 
 /** A 2D point, used for prism footprints. */
@@ -108,9 +114,41 @@ export function withDoor<B extends { readonly door?: string }>(brush: B, door: s
   return (door ? { ...rest, door } : rest) as B;
 }
 
-/** `to` with the detail flag and door name of `from` (keeps flags across geometry edits). */
-export const withFlags = <B extends { readonly detail?: boolean; readonly door?: string }>(to: B, from: { readonly detail?: boolean; readonly door?: string }): B =>
-  withDoor(withDetail(to, from.detail), from.door);
+/** `brush` with `faceSplitBias` set to `bias` (padded / cut to the face count; omitted when all 0 or not finite). */
+export function withSplitBias<B extends { readonly planes: readonly Plane3[]; readonly faceSplitBias?: readonly number[] }>(brush: B, bias: readonly number[] | undefined): B {
+  const { faceSplitBias: _old, ...rest } = brush;
+  const values = brush.planes.map((_, i) => (Number.isFinite(bias?.[i]) ? bias![i] : 0));
+  return (values.some((v) => v !== 0) ? { ...rest, faceSplitBias: values } : rest) as B;
+}
+
+/** Source of brush flags: a brush, a builder spec or parsed JSON. */
+export interface BrushFlags {
+  readonly detail?: boolean;
+  readonly door?: string;
+  /** Per-face bias; matched to the target's faces by normal if `planes` is given, else by position. */
+  readonly faceSplitBias?: readonly number[];
+  readonly planes?: readonly Plane3[];
+}
+
+/**
+ * `faceSplitBias` of `from` re-indexed for the planes `to`: by equal normal direction when `from` has
+ * planes (geometry edits keep normals but may drop or reorder faces), else by position.
+ */
+function carriedSplitBias(to: readonly Plane3[], from: BrushFlags): readonly number[] | undefined {
+  const src = from.faceSplitBias;
+  if (!src || !src.some((v) => v !== 0)) return undefined;
+  const old = from.planes;
+  if (!old) return src;
+  const unit = old.map((p) => normalize(p.n));
+  return to.map((p) => {
+    const j = unit.findIndex((n) => dot(n, p.n) > 1 - 1e-9);
+    return j >= 0 ? src[j] ?? 0 : 0;
+  });
+}
+
+/** `to` with the detail flag, door name and face split biases of `from` (keeps flags across geometry edits). */
+export const withFlags = <B extends { readonly planes: readonly Plane3[]; readonly detail?: boolean; readonly door?: string; readonly faceSplitBias?: readonly number[] }>(to: B, from: BrushFlags): B =>
+  withSplitBias(withDoor(withDetail(to, from.detail), from.door), carriedSplitBias(to.planes, from));
 
 /** True if the brush takes part in the BSP: every room, and solids that are neither detail nor doors. */
 export const isStructural = (b: { readonly kind: string; readonly detail?: boolean; readonly door?: string }): boolean => b.kind === "room" || (!b.detail && !b.door);

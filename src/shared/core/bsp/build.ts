@@ -77,6 +77,8 @@ export interface BuildContext<D extends Dim> {
   readonly opts: BspBuildOptions;
   /** `planeRank[i]`: position of wall plane i in canonical order ({@link planeRanks}); splitter ties go to the lowest. */
   readonly planeRank: Int32Array;
+  /** `planeBias[i]`: score offset of wall plane i (lowest voting `Wall.splitBias` on it, else 0); null if no wall votes. */
+  readonly planeBias: Float64Array | null;
 }
 
 /**
@@ -128,7 +130,24 @@ export function prepareBuild<D extends Dim>(g: Geometry<D>, walls: readonly Wall
   const bounds = snapBounds(g, g.expandBounds(g.boundsOf(points) ?? { min: g.zero, max: g.zero }, opts.boundsMargin));
   const rootRegion = g.cellFromBounds(bounds, BOUNDS_TAG);
   const refineWalls = refinementEnabled(opts) ? prepareRefineWalls(g, walls) : [];
-  return { planes, fragments, bounds, rootRegion, refineWalls, opts, planeRank: planeRanks(g, planes) };
+  return { planes, fragments, bounds, rootRegion, refineWalls, opts, planeRank: planeRanks(g, planes), planeBias: planeBiases(walls, fragments, planes.length) };
+}
+
+/**
+ * Per-plane splitter bias (phase 3d): the lowest nonzero `splitBias` of the walls on each plane, 0 if none
+ * votes. Lowest wins so one hint face on a shared plane (e.g. a floor level) is enough to prefer it, and
+ * avoiding a plane takes every voting face on it. Null when no wall votes (the common case: no work).
+ */
+function planeBiases<D extends Dim>(walls: readonly Wall<D>[], fragments: readonly Fragment<D>[], count: number): Float64Array | null {
+  let bias: Float64Array | null = null;
+  for (let i = 0; i < walls.length; i++) {
+    const v = walls[i].splitBias;
+    if (!v || !Number.isFinite(v)) continue;
+    bias ??= new Float64Array(count);
+    const p = fragments[i].plane;
+    if (bias[p] === 0 || v < bias[p]) bias[p] = v;
+  }
+  return bias;
 }
 
 /** Bounds snap to multiples of (power of two ≥ largest extent) / this; see {@link snapBounds}. */
@@ -324,7 +343,7 @@ export interface SplitChoice {
 /** Scores every distinct plane among the fragments (non-empty) and returns the cheapest (an index into `ctx.planes`). */
 export function chooseSplitter<D extends Dim>(g: Geometry<D>, frags: readonly Fragment<D>[], ctx: BuildContext<D>): number {
   const candidates = splitCandidates(frags, ctx.planeRank, ctx.opts.maxCandidates);
-  return candidates.length === 1 ? candidates[0] : scoreSplitters(g, frags, candidates, ctx.planes, ctx.opts).plane;
+  return candidates.length === 1 ? candidates[0] : scoreSplitters(g, frags, candidates, ctx.planes, ctx.opts, ctx.planeBias).plane;
 }
 
 /**
@@ -332,17 +351,18 @@ export function chooseSplitter<D extends Dim>(g: Geometry<D>, frags: readonly Fr
  * the first one with the lowest {@link splitterScore}; `onPlane` = fragments with the candidate's
  * plane id (consumed by the node). Scoring candidate chunks separately and
  * keeping the lowest score (ties: earliest chunk) gives the same choice.
+ * `bias`: per-plane score offset (`BuildContext.planeBias`; null = none).
  * `useSweep` (default true): score large groups of parallel candidates at once (`sweep.ts`, exact: same scores);
  * false keeps the per-candidate loop (reference for tests).
  */
-export function scoreSplitters<D extends Dim>(g: Geometry<D>, frags: readonly Fragment<D>[], candidates: readonly number[], planes: readonly Plane<D>[], opts: BspBuildOptions, useSweep = true): SplitChoice {
+export function scoreSplitters<D extends Dim>(g: Geometry<D>, frags: readonly Fragment<D>[], candidates: readonly number[], planes: readonly Plane<D>[], opts: BspBuildOptions, bias: ArrayLike<number> | null = null, useSweep = true): SplitChoice {
   let best = candidates[0];
   let bestScore = Infinity;
   const facing = opts.facingWeight ?? 0;
   const q = balanceQuantum(frags.length);
   const onPlane = new Map<number, number>();
   if (facing) for (const f of frags) onPlane.set(f.plane, (onPlane.get(f.plane) ?? 0) + 1);
-  const swept = useSweep && candidates.length >= SWEEP_MIN_GROUP ? sweepScores(g, frags, candidates, planes, opts) : null;
+  const swept = useSweep && candidates.length >= SWEEP_MIN_GROUP ? sweepScores(g, frags, candidates, planes, opts, bias) : null;
   for (const planeIndex of candidates) {
     const known = swept?.get(planeIndex);
     if (known !== undefined) {
@@ -355,6 +375,7 @@ export function scoreSplitters<D extends Dim>(g: Geometry<D>, frags: readonly Fr
     const plane = planes[planeIndex];
     const own = onPlane.get(planeIndex) ?? 0;
     const bonus = facing * own;
+    const offset = bias ? bias[planeIndex] : 0;
     let front = 0, back = 0, splits = 0;
     for (const f of frags) {
       if (f.plane === planeIndex) continue;
@@ -365,9 +386,9 @@ export function scoreSplitters<D extends Dim>(g: Geometry<D>, frags: readonly Fr
         case Side.On: if (g.dot(planes[f.plane].n, plane.n) < 0) back++; break;
       }
       // Early out: this candidate can no longer beat the best one.
-      if (splits * opts.splitWeight - bonus >= bestScore) break;
+      if (splits * opts.splitWeight - bonus + offset >= bestScore) break;
     }
-    const score = splitterScore(splits, front, back, own, q, opts);
+    const score = splitterScore(splits, front, back, own, q, opts, offset);
     if (score < bestScore) {
       bestScore = score;
       best = planeIndex;

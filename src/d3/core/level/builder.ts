@@ -4,11 +4,17 @@ import { type Brush, type BrushKind, type Point2, makeBoxBrush, makeBrush, makeP
 import { type Level, LEVEL_FORMAT, LEVEL_VERSION } from "./level";
 import type { Plane3 } from "../math";
 
-/** A brush as an axis box `[x0, y0, z0, x1, y1, z1]`, a vertical prism over a footprint, or outward planes; `detail` marks a non-cutting solid, `door` a door volume (phase 4b). */
+/**
+ * A brush as an axis box `[x0, y0, z0, x1, y1, z1]`, a vertical prism over a footprint, or outward planes;
+ * `detail` marks a non-cutting solid, `door` a door volume (phase 4b), `faceSplitBias` per-face BSP splitter
+ * bias (phase 3d) in face order: box −x, +x, −y, +y, −z, +z; prism bottom, top, then footprint hull edges;
+ * planes: their order.
+ */
+type SpecFlags = { detail?: boolean; door?: string; faceSplitBias?: number[] };
 export type BrushSpec =
-  | { kind: BrushKind; box: [number, number, number, number, number, number]; detail?: boolean; door?: string }
-  | { kind: BrushKind; prism: Point2[]; z0: number; z1: number; detail?: boolean; door?: string }
-  | { kind: BrushKind; planes: Plane3[]; detail?: boolean; door?: string };
+  | ({ kind: BrushKind; box: [number, number, number, number, number, number] } & SpecFlags)
+  | ({ kind: BrushKind; prism: Point2[]; z0: number; z1: number } & SpecFlags)
+  | ({ kind: BrushKind; planes: Plane3[] } & SpecFlags);
 
 /** Builds a level from specs; ids are 1-based spec order, degenerate specs are dropped. */
 export function build(specs: readonly BrushSpec[]): Level {
@@ -20,7 +26,7 @@ export function build(specs: readonly BrushSpec[]): Level {
       : "prism" in s
         ? makePrismBrush(id, s.kind, s.prism, s.z0, s.z1)
         : makeBrush(id, s.kind, s.planes);
-    if (b) brushes.push(withFlags(b, s));
+    if (b) brushes.push(withFlags(b, { detail: s.detail, door: s.door, faceSplitBias: s.faceSplitBias, planes: "planes" in s ? s.planes : undefined }));
   });
   return { format: LEVEL_FORMAT, version: LEVEL_VERSION, brushes, meshes: [] };
 }
