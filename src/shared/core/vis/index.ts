@@ -10,3 +10,6 @@ export * from "./parallelPassages";
 export * from "./parallelBaseVis";
 export * from "./clusterRows";
 export * from "./pvsClusters";
+export * from "./portalMatch";
+export * from "./incrementalFlow";
+export * from "./incrementalBaseVis";

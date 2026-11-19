@@ -37,7 +37,8 @@ src/shared/core/      dimension-agnostic compiler, generic over D extends Dim
   portals/            Portal<D>/PortalGraph<D> types, components, leak detection, pack (flat worker messages),
                       clusters (convex leaf clusters, phase 3e)
   parallel/           workerQueue (next idle worker), costChunks, threadsFor
-  vis/                BitSet, base vis, clusterRows (cluster rows → leaf portals), passages (canSee table), parallelRows (base vis + passages on workers), portal flow (+ exact parallel dependency scheduler), leaf PVS, shared PVS rows + columns (pvsTable), PVS clusters (pvsClusters, phase 3b)
+  spatial/bvh.ts      BVH over boxes (CSG broad phase)
+  vis/                BitSet, base vis, clusterRows (cluster rows → leaf portals), passages (canSee table), parallelRows (base vis + passages on workers), portal flow (+ exact parallel dependency scheduler), leaf PVS, shared PVS rows + columns (pvsTable), PVS clusters (pvsClusters, phase 3b), incremental base vis + flow (portalMatch, incrementalBaseVis, incrementalFlow, phase 3.5)
   pipeline.ts         createCompiler(config) → { compileLevel, compileWalls }
   export/pvsRows.ts   decodePvsRow
   gen/maze.ts         seeded RNG + maze generator for demo levels

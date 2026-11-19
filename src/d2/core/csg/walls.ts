@@ -32,7 +32,7 @@ import {
   segmentIntersection, projectParam, distanceToSegmentLine, convexContains, lineFromPoints,
   KEY_QUANTUM, MIN_LENGTH, PLANE_EPSILON, PROBE_OFFSET,
 } from "../math";
-import type { Wall as SharedWall } from "../../../shared/core";
+import { type Bvh, type Wall as SharedWall, bvhAnyAt, bvhQueryBox, buildBvh } from "../../../shared/core";
 import type { Dim2 } from "../geometry";
 import { type Brush, isStructural } from "../level";
 
@@ -42,12 +42,31 @@ export type Wall = SharedWall<Dim2>;
 /** Point classifier for the CSG result. */
 export type EmptySpaceTest = (p: Vec2) => boolean;
 
+/** Brushes with their bounding boxes in a BVH (broad phase: CSG cost was O(edges × brushes)). */
+interface BrushIndex {
+  readonly brushes: readonly Brush[];
+  /** `[minX, minY, maxX, maxY]` per brush. */
+  readonly boxes: Float64Array;
+  readonly bvh: Bvh;
+}
+
+/** Builds the {@link BrushIndex} of `brushes`. */
+function indexBrushes(brushes: readonly Brush[]): BrushIndex {
+  const boxes = new Float64Array(brushes.length * 4);
+  brushes.forEach((b, i) => {
+    const xs = b.vertices.map((v) => v.x), ys = b.vertices.map((v) => v.y);
+    boxes.set([Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)], i * 4);
+  });
+  return { brushes, boxes, bvh: buildBvh(boxes, 2) };
+}
+
 /** Builds the empty-space membership test for a set of brushes. */
 export function makeEmptySpaceTest(brushes: readonly Brush[]): EmptySpaceTest {
-  const rooms = brushes.filter((b) => b.kind === "room");
-  const solids = brushes.filter((b) => b.kind === "solid");
+  const rooms = indexBrushes(brushes.filter((b) => b.kind === "room"));
+  const solids = indexBrushes(brushes.filter((b) => b.kind === "solid"));
   // Strict containment: brush boundaries are never empty on their own; the probes sit off the boundary.
-  return (p) => rooms.some((b) => convexContains(b.vertices, p, true)) && !solids.some((b) => convexContains(b.vertices, p, true));
+  const inside = (ix: BrushIndex, p: Vec2) => bvhAnyAt(ix.bvh, ix.boxes, [p.x, p.y], 0, (i) => convexContains(ix.brushes[i].vertices, p, true));
+  return (p) => inside(rooms, p) && !inside(solids, p);
 }
 
 /** Creates a wall from a segment (empty space on the left). Returns null for degenerate segments. */
@@ -71,13 +90,16 @@ export function buildDetailWalls(brushes: readonly Brush[]): Wall[] {
 /** Computes the walls of the CSG result of `brushes`. */
 export function buildWalls(brushes: readonly Brush[]): Wall[] {
   const isEmpty = makeEmptySpaceTest(brushes);
+  const index = indexBrushes(brushes);
   const pieces: Wall[] = [];
 
   for (const brush of brushes) {
     const n = brush.vertices.length;
     for (let i = 0; i < n; i++) {
       const edge: Segment = { a: brush.vertices[i], b: brush.vertices[(i + 1) % n] };
-      for (const piece of fragmentEdge(edge, brush, brushes)) {
+      // Only brushes whose box reaches the edge can cut it (hits lie on it; on-line vertices within PLANE_EPSILON).
+      const near = bvhQueryBox(index.bvh, index.boxes, [Math.min(edge.a.x, edge.b.x), Math.min(edge.a.y, edge.b.y)], [Math.max(edge.a.x, edge.b.x), Math.max(edge.a.y, edge.b.y)], 2 * PLANE_EPSILON);
+      for (const piece of fragmentEdge(edge, brush, near.map((j) => brushes[j]))) {
         const wall = classifyPiece(piece, brush.id, isEmpty);
         if (wall) pieces.push(wall);
       }
@@ -86,7 +108,7 @@ export function buildWalls(brushes: readonly Brush[]): Wall[] {
   return mergeCollinear(dedupe(pieces));
 }
 
-/** Splits an edge at all intersections with other brushes' edges and vertices. */
+/** Splits an edge at all intersections with other brushes' edges and vertices (`brushes`: candidates, may include `owner`). */
 function fragmentEdge(edge: Segment, owner: Brush, brushes: readonly Brush[]): Segment[] {
   const params: number[] = [0, 1];
   const len = distance(edge.a, edge.b);

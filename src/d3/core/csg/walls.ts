@@ -37,7 +37,7 @@ import {
   windingAabb, windingArea, windingCenter, windingPlane,
   MIN_AREA, PROBE_OFFSET,
 } from "../math";
-import type { Wall as SharedWall } from "../../../shared/core";
+import { type Bvh, type Wall as SharedWall, bvhAnyAt, bvhQueryBox, buildBvh } from "../../../shared/core";
 import type { Dim3 } from "../geometry";
 import { type Brush, brushContains, isStructural } from "../level";
 
@@ -47,12 +47,29 @@ export type Wall = SharedWall<Dim3>;
 /** Point classifier for the CSG result. */
 export type EmptySpaceTest = (p: Vec3) => boolean;
 
+/** Brushes with their bounds in a BVH (broad phase: avoids scanning every brush per face / probe). */
+interface BrushIndex {
+  readonly brushes: readonly Brush[];
+  /** `[min xyz, max xyz]` per brush (`Brush.bounds`). */
+  readonly boxes: Float64Array;
+  readonly bvh: Bvh;
+}
+
+/** Builds the {@link BrushIndex} of `brushes`. */
+function indexBrushes(brushes: readonly Brush[]): BrushIndex {
+  const boxes = new Float64Array(brushes.length * 6);
+  brushes.forEach(({ bounds: { min, max } }, i) => boxes.set([min.x, min.y, min.z, max.x, max.y, max.z], i * 6));
+  return { brushes, boxes, bvh: buildBvh(boxes, 3) };
+}
+
 /** Builds the empty-space membership test for a set of brushes. */
 export function makeEmptySpaceTest(brushes: readonly Brush[]): EmptySpaceTest {
-  const rooms = brushes.filter((b) => b.kind === "room");
-  const solids = brushes.filter((b) => b.kind === "solid");
+  const rooms = indexBrushes(brushes.filter((b) => b.kind === "room"));
+  const solids = indexBrushes(brushes.filter((b) => b.kind === "solid"));
   // Strict containment: brush boundaries are never empty on their own; the probes sit off the boundary.
-  return (p) => rooms.some((b) => brushContains(b, p, true)) && !solids.some((b) => brushContains(b, p, true));
+  // The box test is only a broad phase, so a generous eps is harmless.
+  const inside = (ix: BrushIndex, p: Vec3) => bvhAnyAt(ix.bvh, ix.boxes, [p.x, p.y, p.z], PROBE_OFFSET, (i) => brushContains(ix.brushes[i], p, true));
+  return (p) => inside(rooms, p) && !inside(solids, p);
 }
 
 /** Creates a wall from a winding (empty space in front). Returns null for degenerate windings. */
@@ -76,14 +93,17 @@ export function buildDetailWalls(brushes: readonly Brush[]): Wall[] {
 /** Computes the walls of the CSG result of `brushes`. */
 export function buildWalls(brushes: readonly Brush[]): Wall[] {
   const isEmpty = makeEmptySpaceTest(brushes);
+  const index = indexBrushes(brushes);
   const pieces: Wall[] = [];
 
   for (const brush of brushes) {
     for (const face of brush.faces) {
-      const faceBox = windingAabb(face.winding);
+      const { min, max } = windingAabb(face.winding);
       let fragments: Winding[] = [face.winding];
-      for (const other of brushes) {
-        if (other === brush || !aabbOverlaps(faceBox, other.bounds, PROBE_OFFSET)) continue;
+      // Same brushes, same (index) order as a full scan with `aabbOverlaps(faceBox, bounds, PROBE_OFFSET)`.
+      for (const j of bvhQueryBox(index.bvh, index.boxes, [min.x, min.y, min.z], [max.x, max.y, max.z], PROBE_OFFSET)) {
+        const other = brushes[j];
+        if (other === brush) continue;
         fragments = fragments.flatMap((w) => fragmentByBrush(w, other));
       }
       for (const w of fragments) {

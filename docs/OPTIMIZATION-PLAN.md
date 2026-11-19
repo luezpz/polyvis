@@ -328,6 +328,84 @@ Left open, bench-driven: 1a flow half, 1c, 1f, 1g. The 3D flow is now dominated 
   bounds touch the change; rerun flow only for sources whose mightSee reaches changed
   portals; reuse cached rows for the rest. Biggest win for editing, not for final bakes.
 
+  **Status: flow reuse done in core (2026-11-18); verdict: small payoff, CSG is the bottleneck.**
+  `vis/incrementalFlow.ts` (`computePortalFlowIncremental`, `FlowCache`), driven by
+  `compileSession()` (both dims; single-threaded, not wired into the editors). Portals match
+  across compiles by exact geometry (`portalKey`: plane + `packFacet` numbers). Source i's old
+  row is reused only if everything `flowFromSource` reads for it maps one-to-one: M = mightSee[i],
+  leaf identities of M's portals, `portalsFrom[leaf] ∩ M` in order, rank relations to i, and each
+  member's known/mightSee row inside M. Checked in flow order, so the result is bit-identical to a
+  fresh flow (tested on every sample level and two edits, both dims). Off with passages, changed
+  flow options, or after truncation. Measured (one solid/room face moved by 0.1, single-threaded):
+
+  | level | portals | matched | reused | flow ms inc / fresh |
+  |---|---|---|---|---|
+  | 2d/Maze 16×16 | 1428 | 1424 | 1402 | 33 / 39 |
+  | 2d/Grid city 8×8 | 630 | 628 | 346 | 56 / 56 |
+  | 2d/Pillar forest | 1248 | 1096 | 332 | 955 / 1056 |
+  | 2d/Oblique lattice | 824 | 646 | 70 | 438 / 423 |
+  | 3d/Maze 10×10 | 396 | 294 | 81 | 22 / 16 |
+  | 3d/Grid city 6×6 | 252 | 108 | 0 | 19 / 15 |
+
+  Findings:
+  - The BSP is mostly stable in 2D (80–99% of portals match) even without incremental BSP;
+    3D less so (27–90%): the global splitter choice reshuffles more.
+  - Open levels: most sources' mightSee reaches the edit, so few rows qualify, and the ones that do
+    are the cheap ones (Pillar forest: 27% reused, −10% flow).
+  - Closed levels reuse nearly everything, but there the flow is already the cheapest stage:
+    2D Maze 16×16 timings are csg 1260 | bsp 107 | base vis 211 | flow 60 ms. The check overhead
+    eats the gain on small graphs.
+  - (Superseded below: CSG got a BVH.) So the editor turnaround was bound by **CSG** (then base vis, BSP), not flow. Next steps, in
+    order: profile/speed up CSG (per-brush caching: a brush's clipped faces only change if a
+    brush overlapping its bounds changed); reuse base vis rows the same way (row i depends on all
+    portals' planes, so needs a bounds-based argument, not exact matching); incremental BSP only
+    if 3D matching rates matter after that. Flow reuse is kept (exact, cheap) but not a priority.
+
+  **CSG broad phase (2026-11-19), always on.** Following three-bvh-csg (BVH to find candidate
+  triangle pairs), `shared/core/spatial/bvh.ts` is a BVH over boxes (any dimension, plain numbers;
+  queries return ids ascending so order-dependent 3D fragmentation is unchanged). Both CSGs use it
+  to find the brushes that can cut an edge/face and for the empty-space probes (rooms and solids
+  indexed separately). 2D had no culling at all (O(edges × brush edges)). Walls are identical
+  (checked by snapshot of every level, both dims). `buildWalls` ms:
+
+  | level | brushes | before | after |
+  |---|---|---|---|
+  | 2d/Maze 16×16 | 511 | 1223 | 44 |
+  | 2d/Grid city 8×8 | 176 | 189 | 23 |
+  | 2d/Pillar forest | 132 | 100 | 10 |
+  | 3d/Maze 10×10 | 199 | 69 | 44 |
+  | 3d/Grid city 6×6 | 96 | 35 | 22 |
+
+  Per-brush CSG caching is no longer worth it (CSG is now < 10% of a compile).
+  `npm run bench` (default set) before → after: every non-timing column identical; total ms 2D Maze
+  16×16 1633 → 398, 2D Grid city 8×8 328 → 177, 3D Maze 10×10 200 → 170, others within noise.
+
+  **Incremental base vis (2026-11-19), in `compileSession()`.** `vis/incrementalBaseVis.ts`; shared
+  matching in `vis/portalMatch.ts` (`portalKeyIds`, `matchPortals`, `LeafBinder`). Row i is a
+  flood from `to(i)` through portals passing rules 1 + 2, which read only the two portals'
+  geometry. So the old row is reused when every portal leaving a leaf the old flood visited is
+  matched, the leaves correspond one-to-one, and no visited leaf gained portals: O(frontier) per row
+  instead of n plane tests. Bit-identical (tests: every sample level × 2 edits × plain / `cluster:
+  "convex"` / passages, both dims). After one edit (warm, single-threaded, ms incremental / fresh):
+
+  | level | portals | base vis reused | base vis ms | flow reused | flow ms | compile ms |
+  |---|---|---|---|---|---|---|
+  | 2d/Maze 16×16 | 1428 | 1402 | 29 / 280 | 1402 | 42 / 48 | 255 / 504 |
+  | 2d/Grid city 8×8 | 630 | 314 | 40 / 49 | 346 | 61 / 73 | 145 / 171 |
+  | 2d/Pillar forest | 1248 | 329 | 266 / 243 | 332 | 1290 / 1311 | 1611 / 1614 |
+  | 2d/Oblique lattice | 824 | 57 | 107 / 97 | 70 | 548 / 572 | 689 / 707 |
+  | 3d/Grid city 6×6 | 252 | 0 | 11 / 9 | 0 | 21 / 20 | 105 / 104 |
+  | 3d/Maze 10×10 | 396 | 81 | 19 / 21 | 81 | 19 / 19 | 200 / 184 |
+
+  Findings: closed levels gain 2× overall; open levels stay flow-bound (rows reach the edit).
+  The check costs up to ~10% when little is reused. 3D reuse is limited by BSP instability (3D Grid
+  city: 108 / 252 portals match), and the BSP is now the largest stage on closed levels (2D Maze
+  ~100 ms, 3D Maze ~80 ms).
+  **Paused here (2026-11-19): editor turnaround is low priority.** Open, if resumed: (1) wire `compileSession` into the editors' compile worker
+  (it is single-threaded: either use it only for small edits, or feed reused rows to the parallel
+  runners as pre-finished sources); (2) a stable/incremental BSP (reuse subtrees whose fragments
+  are unchanged; a stable splitter choice so a local edit does not reshuffle the root splits).
+
 ## Phase 4: runtime portal clipping (Doom 3, PVS as prefilter)
 
 Pure TS module `src/shared/core/runtime/` (no DOM; usable in editor preview and engines).
@@ -398,7 +476,7 @@ Doors must block vis when closed, without rebaking.
 | 3c column sharing (done in core; export v3 open) | S | rows 1.2–6× narrower, lossless |
 | 1d allocation-free bitsets, 1e early-out (done) | S | flow −10–17% |
 | 3e convex leaf clusters (done, option) | S–M | flow up to 2× faster, Σ pvs +10–100%: draft bakes |
-| 3.5 incremental recompile | L | editor turnaround |
+| 3.5 CSG BVH (done), incremental base vis + flow (done in core, `compileSession`) | M | CSG up to 28× faster; closed levels recompile 2× faster after an edit; editor wiring + stable BSP open |
 | 4 runtime clipping | L | runtime culling |
 | 4b occluding doors | M | closed doors hide rooms, no rebake |
 | 1c, 1f, 1g, 3a (no-op on leaves), 3d, 5 | S–M | situational, bench-driven |

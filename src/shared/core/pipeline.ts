@@ -10,7 +10,7 @@
 import { type BspBuildOptions, type BspBuildResult, type BspStats, type BspTree, type LeafSurface, buildBsp, buildLeafSurfaces } from "./bsp";
 import type { Dim, Geometry } from "./geometry";
 import { type BoundaryPiece, type ClusterOptions, type LeakReport, type PortalGraph, buildLeafClusters, detectLeaks } from "./portals";
-import { type BitSet, type PassageTable, type PortalFlowOptions, type PortalFlowResult, type PortalFlowStats, type PvsSymmetry, type PvsClusterOptions, type PvsClusters, type PvsTable, buildPvsClusters, buildPvsTable, computeBaseVis, computePassages, passageMightSee, computeLeafPvs, computePortalFlow, expandClusterRows } from "./vis";
+import { type BitSet, type PassageTable, type PortalFlowOptions, type PortalFlowResult, type PortalFlowStats, type PvsSymmetry, type PvsClusterOptions, type PvsClusters, type PvsTable, type BaseVisCache, type FlowCache, buildPvsClusters, computeBaseVisIncremental, portalKeyIds, buildPvsTable, computeBaseVis, computePortalFlowIncremental, computePassages, passageMightSee, computeLeafPvs, computePortalFlow, expandClusterRows } from "./vis";
 import type { Wall } from "./wall";
 
 export interface CompileOptions {
@@ -127,6 +127,20 @@ export interface Compiler<D extends Dim, L> {
   compileWalls(walls: readonly Wall<D>[], options?: Partial<CompileOptions>, timings?: StageTiming[]): CompileResult<D>;
   /** Like `compileLevel`, but stages with a runner in `runners` are delegated to it (e.g. a worker pool). */
   compileLevelAsync(level: L, options: Partial<CompileOptions>, runners: StageRunners<D>): Promise<CompileResult<D>>;
+  /** Starts an editing session whose compiles reuse the previous compile's flow rows where exact (phase 3.5). */
+  session(): CompileSession<D, L>;
+}
+
+/** Rows a session compile took from the previous one (counts over the vis graph's portals). */
+export interface SessionReuse {
+  readonly baseVis: number;
+  readonly flow: number;
+}
+
+/** Stateful, single-threaded compiles that reuse flow rows across edits (`computePortalFlowIncremental`). */
+export interface CompileSession<D extends Dim, L> {
+  /** Like `Compiler.compileLevel`, plus how many base vis rows and flow sources came from the previous compile. */
+  compileLevel(level: L, options?: Partial<CompileOptions>): { readonly result: CompileResult<D>; readonly reused: SessionReuse };
 }
 
 /** Runs the BSP stage with complete options; must return what `buildBsp` would. */
@@ -247,7 +261,31 @@ export function createCompiler<D extends Dim, L>(config: CompilerConfig<D, L>): 
     return { ...afterFlow(pre, flow, opts, timings), detailWalls };
   };
 
-  return { compileLevel, compileWalls, compileLevelAsync };
+  const session = (): CompileSession<D, L> => {
+    let baseCache: BaseVisCache<D> | null = null;
+    let flowCache: FlowCache<D> | null = null;
+    return {
+      compileLevel(level, options = {}) {
+        const opts: CompileOptions = { ...DEFAULT_COMPILE_OPTIONS, ...options };
+        const timings: StageTiming[] = [];
+        const walls = timed(timings, "csg", () => config.levelWalls(level));
+        const detailWalls = levelDetailWalls(level, timings);
+        const bsp = timed(timings, "bsp", () => buildBsp(g, walls, bspOptions(opts)));
+        const portals = throughPortals(walls, bsp, opts, timings);
+        const ids = timed(timings, "portal keys", () => portalKeyIds(g, portals.visGraph));
+        const bv = timed(timings, "base vis", () => computeBaseVisIncremental(g, portals.visGraph, baseCache, ids));
+        baseCache = bv.cache;
+        const base = { ...portals, base: bv.rows as readonly BitSet[] };
+        const passages = opts.baseVis === "passages" ? timed(timings, "passage vis", () => computePassages(g, base.visGraph, base.base)) : null;
+        const pre = withPassages(base, passages, timings);
+        const flow = timed(timings, "portal flow", () => computePortalFlowIncremental(g, pre.visGraph, pre.mightSee, flowOptions(opts, pre), flowCache, ids));
+        flowCache = flow.cache;
+        return { result: { ...afterFlow(pre, flow, opts, timings), detailWalls }, reused: { baseVis: bv.reused, flow: flow.reused } };
+      },
+    };
+  };
+
+  return { compileLevel, compileWalls, compileLevelAsync, session };
 }
 
 /** The flow options of a compile; with a passage table, also the table and the base-vis source order. */

@@ -93,6 +93,11 @@ only decisions, gotchas and open items. The 2D/3D merge (former PLAN.md / PROGRE
 - Phase 3f BSP options `facingWeight`, `maxCandidates` (off by default; mixed with corner splits, a clear win without them: default-flip candidate). Any splitter
   change must go through `splitCandidates`/`scoreSplitters` so the parallel BSP stays identical.
 - `Geometry.facetMeasure` (2D length, 3D area) was added for 3b.
+- Phase 3.5: CSG uses a BVH broad phase (`shared/core/spatial/bvh.ts`, both dims; queries return ids ascending
+  because 3D fragmentation is order-dependent). `compileSession()` reuses base vis rows (`incrementalBaseVis.ts`)
+  and flow rows (`incrementalFlow.ts`) across edits, portals matched by exact geometry (`portalMatch.ts`);
+  bit-identical to fresh. Single-threaded, not wired into the editors yet. BSP is now the largest stage on
+  closed levels and its instability limits 3D reuse.
 
 ## Gotchas
 - The flow's separator cache (1b) relies on `clipFacet` returning the **same object** when nothing
@@ -100,6 +105,7 @@ only decisions, gotchas and open items. The 2D/3D merge (former PLAN.md / PROGRE
 - Git history of the source repos (`polyvis2d` cdac3e9, `polyvis3d` 2de2526) was not carried over.
 
 ## Open TODOs
+- Phase 3.5 paused (editor is low priority): wire `compileSession` into the compile worker; stable/incremental BSP.
 - 3D Oblique lattice truncates at the 20 M `maxSteps` budget (bench, single-threaded; ~92 s
   after phase 1, was ~118 s). Fixed with `baseVis: "passages"` (12.5 M steps, ~70 s), still truncates by default.
 - Debug layers portal graph / vis clusters / PVS heatmap read `shared/app/render/debugInfo.ts` (cached per

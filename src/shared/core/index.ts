@@ -5,6 +5,7 @@
 
 export * from "./math";
 export * from "./parallel";
+export * from "./spatial";
 export * from "./geometry";
 export * from "./wall";
 export * from "./bsp";

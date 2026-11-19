@@ -36,3 +36,6 @@ export const compileWalls = (walls: readonly Wall[], options: Partial<shared.Com
 /** Like `compileLevel`, but stages with a runner in `runners` are delegated to it (the editor's worker pool). */
 export const compileLevelAsync = (level: Level, options: Partial<shared.CompileOptions>, runners: shared.StageRunners<Dim2>): Promise<CompileResult> =>
   compiler.compileLevelAsync(level, options, runners);
+
+/** Editing session: compiles reuse the previous compile's flow rows where exact (phase 3.5). */
+export const compileSession = (): shared.CompileSession<Dim2, Level> => compiler.session();
