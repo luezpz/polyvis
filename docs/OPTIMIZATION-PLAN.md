@@ -511,8 +511,8 @@ Doors must block vis when closed, without rebaking.
 
 - ~~PAS~~ dropped (2026-11-19): a baked artifact that can't be rebuilt at map load, and not needed.
   Sound runs on the portal graph at runtime instead, with door portals attenuating or stopping it.
-- Per-cluster draw lists from original triangles (OBJ path) for the runtime renderer.
-- PVS export compression: zero-run RLE per row (Quake), on top of row/column sharing.
+- Export items (per-cluster draw lists, zero-run RLE rows, column sharing in the file, door → portal
+  list) moved out (2026-11-19): export gets its own plan.
 - WASM/SIMD for the antipenumbra clip: only if the bench shows the TS hot loop is the
   ceiling after phases 1–2.
 
@@ -533,4 +533,28 @@ Doors must block vis when closed, without rebaking.
 | 3.5 CSG BVH (done), incremental base vis + flow (done in core, `compileSession`) | M | CSG up to 28× faster; closed levels recompile 2× faster after an edit; editor wiring + stable BSP open |
 | 4 runtime clipping (done: planes + rect modes, culling, typed-array + v3 file export, editor layer) | L | runtime culling: e.g. PVS 46 → 7 leaves |
 | 4b occluding doors (done for brushes; OBJ doors open) | M | closed doors hide rooms, no rebake |
-| 1c, 1f, 1g, 3a (no-op on leaves), 3d, 5 | S–M | situational, bench-driven |
+| 3a (no-op on leaves) | S | none on the bench levels |
+
+### Leftovers (open, in suggested order)
+
+| Phase | Effort | Payoff |
+|---|---|---|
+| BSP splitter sweep (done 2026-11-19, exact, always on) | S | BSP 2D Maze 93 → 31 ms, 3D Maze 78 → 42 ms, 2D Grid city 29 → 17 ms; same trees |
+| flow hot-loop arithmetic (done 2026-11-19, exact) | S | 3D `clipWinding` scratch buffer: flow 3D Pillar forest ~600 → ~430 ms; 2D separators inlined, hypot skipped by a squared pre-check: 2D flow ~2.3× faster (Pillar forest 976 → 416 ms) |
+| 3.5 stable BSP (stable splitter choice, reuse unchanged subtrees) | M–L | BSP is the largest stage on closed levels (2D Maze ~100 ms, 3D Maze ~80 ms); repeatable results across re-imports, and more 3D incremental reuse (Grid city 108 / 252 portals match today) |
+| 1g separator order / early reject | S | targets step 4, the 3D flow hot spot; bench-driven |
+| 1f flat portal storage in workers | M | fewer object reads in the flow; also tells whether WASM is worth it |
+| 4 runtime coherence (reuse last frame's result inside the same leaf, cache static-light results) | S | cuts worst-case frames (planes cam 8–260 µs per query) |
+| 3d hint walls (`hint_` material in the OBJ) | S–M | tighter PVS and faster flow on open levels, placed in Blender |
+| 1a flow half (sphere test before `clipFacet`) | S | doubtful: step 1 almost never rejects |
+| 1c winding pooling | S | only if the profile shows GC time |
+| 5 WASM/SIMD antipenumbra clip | L | only if 1f shows the arithmetic is the ceiling |
+
+**BSP splitter sweep (2026-11-19).** Profile: splitter scoring was 78% of the build (O(candidates ×
+fragments) per node). `bsp/sweep.ts` scores each group of ≥ 4 candidates sharing an exact (or negated)
+normal at once: per fragment, the min / max of `n·p` decide front / back for every offset (rounding of
+`x − d` is monotone), so counts are binary searches over sorted extremes; "on" fragments come from a window
+over thin fragments. Bit-identical scores (`tests/shared/bspSweep.test.ts`, both kernels, incl. jitter
+within the eps band); bench portals and Σ pvs unchanged. Now 3D BSP time: region clipping
+(`clipPolyhedron`, mostly the cap winding) ~46%, scoring ~35%. Making the clip cheaper changes region
+numerics (not bit-identical), so it is left open.

@@ -92,6 +92,9 @@ only decisions, gotchas and open items. The 2D/3D merge (former PLAN.md / PROGRE
   sums, not previous cluster rows (growth compounds otherwise). Not in the export yet.
 - Phase 3f BSP options `facingWeight`, `maxCandidates` (off by default; mixed with corner splits, a clear win without them: default-flip candidate). Any splitter
   change must go through `splitCandidates`/`scoreSplitters` so the parallel BSP stays identical.
+- BSP splitter sweep (`bsp/sweep.ts`, always on): `scoreSplitters` scores groups of ≥ 4 parallel candidates
+  by sorting fragment extremes along the normal; bit-identical to the per-candidate loop (`useSweep = false`
+  is the test reference). Groups need *exactly* equal / negated normals (axis-aligned OBJ data has them).
 - `Geometry.facetMeasure` (2D length, 3D area) was added for 3b.
 - Phase 3.5: CSG uses a BVH broad phase (`shared/core/spatial/bvh.ts`, both dims; queries return ids ascending
   because 3D fragmentation is order-dependent). `compileSession()` reuses base vis rows (`incrementalBaseVis.ts`)
@@ -114,7 +117,15 @@ only decisions, gotchas and open items. The 2D/3D merge (former PLAN.md / PROGRE
   Engines do sound on the portal graph instead (flood from the source leaf), using door portals
   (`DoorInfo.portals`) to attenuate or stop sound.
 
+- Flow hot loops (2026-11-19): 3D `clipWinding` uses a module scratch `Float64Array` (not re-entrant) and
+  inlined `signedDistance`; 2D `buildSeparators` inlines the line math.
+- No `Math.hypot` anywhere (slow): lengths are `Math.sqrt` of explicit products. Threshold comparisons use
+  squared values (`distanceSq` in both vec modules, `MIN_LENGTH_SQ`) and skip the sqrt. Bench results were
+  unchanged by the switch.
+
 ## Gotchas
+- Bench profiles (`node --cpu-prof scripts/bench.mjs ...`) show Vite's module runner `get` (import
+  bindings resolved through getters) as a large self-time entry: a bench artifact, absent in bundles.
 - The flow's separator cache (1b) relies on `clipFacet` returning the **same object** when nothing
   is cut (both kernels do); `Geometry.separators` must list planes in `clipToSeparators` order.
 - Git history of the source repos (`polyvis2d` cdac3e9, `polyvis3d` 2de2526) was not carried over.

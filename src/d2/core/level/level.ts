@@ -84,7 +84,7 @@ export function moveBrushEdge(brush: Brush, index: number, offset: number): Brus
   const box = aabbFromPoints(vs);
   if (!box) return null;
   // Start from a box large enough to contain the result, then clip by every (inward) edge line.
-  const margin = 1000 * (Math.hypot(box.max.x - box.min.x, box.max.y - box.min.y) + Math.abs(offset) + 1);
+  const margin = 1000 * (Math.sqrt((box.max.x - box.min.x) ** 2 + (box.max.y - box.min.y) ** 2) + Math.abs(offset) + 1);
   let poly: ConvexPolygon | null = polygonFromAabb(expandAabb(box, margin));
   for (let i = 0; i < n && poly; i++) {
     const a = vs[i], b = vs[(i + 1) % n];

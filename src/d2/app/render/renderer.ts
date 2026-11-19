@@ -161,7 +161,7 @@ export class Renderer {
     const p = view.inspect.point;
     if (!p || result.tree.leaves[locateLeaf(result.tree, p)].contents !== "empty") return;
     const b = result.tree.bounds;
-    const maxDist = Math.hypot(b.max.x - b.min.x, b.max.y - b.min.y);
+    const maxDist = Math.sqrt((b.max.x - b.min.x) ** 2 + (b.max.y - b.min.y) ** 2);
     const poly = visibilityPolygon(result.walls.map((w) => w.winding), p, maxDist);
     this.painter.polygon(poly, COLORS.lineOfSight, { color: COLORS.lineOfSightStroke, width: 1 });
   }
