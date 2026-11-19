@@ -35,11 +35,12 @@ src/shared/core/      dimension-agnostic compiler, generic over D extends Dim
   bsp/                build (subtree tasks + assembly), splitter sweep (exact batch scoring), parallel build, pack (flat worker
                       messages), refine (corner/size splits), query, leaf surfaces, types
   portals/            Portal<D>/PortalGraph<D> types, components, leak detection, pack (flat worker messages),
+                      flat (FlatPortals: SoA typed arrays for hot vis kernels, phase 6a),
                       clusters (convex leaf clusters, phase 3e)
   parallel/           workerQueue (next idle worker), costChunks, threadsFor
   spatial/bvh.ts      BVH over boxes (CSG broad phase)
   doors/              occluding doors (phase 4b): door leaf splits, door → portals + sealing, runtime portalOpen
-  vis/                BitSet, base vis, clusterRows (cluster rows → leaf portals), passages (canSee table), parallelRows (base vis + passages on workers), portal flow (+ exact parallel dependency scheduler), leaf PVS, shared PVS rows + columns (pvsTable), PVS clusters (pvsClusters, phase 3b), incremental base vis + flow (portalMatch, incrementalBaseVis, incrementalFlow, phase 3.5)
+  vis/                BitSet, base vis, clusterRows (cluster rows → leaf portals), passages (canSee table), flatFlow + flatKernel (flow on flat arrays, phase 6b), parallelRows (base vis + passages on workers), portal flow (+ exact parallel dependency scheduler), leaf PVS, shared PVS rows + columns (pvsTable), PVS clusters (pvsClusters, phase 3b), incremental base vis + flow (portalMatch, incrementalBaseVis, incrementalFlow, phase 3.5)
   runtime/            runtime portal clipping (phase 4): visibleLeaves (planes / rect modes), View camera,
                       object/light culling (leavesInBounds, lightLeaves), packRuntime typed-array export
   pipeline.ts         createCompiler(config) → { compileLevel, compileWalls }
@@ -121,7 +122,12 @@ Features should land in both dimensions; record any intentional parity gap in NO
 
 - TypeScript strict; no `any`. Plain objects + functions in core; classes only for state.
 - Zero runtime dependencies (the WebGL layer is hand-written on purpose).
-- Hot loops (`vis/portalFlow.ts`, `d3/core/vis/antipenumbra.ts`) use plain arithmetic.
+- Hot loops (`vis/portalFlow.ts`, `d3/core/vis/antipenumbra.ts`) use plain arithmetic. Hot kernels read
+  flat typed arrays (`FlatPortals`), not `Vec` objects (boxed doubles); copy imported constants to locals there
+  (imports are getters under Vite's module runner, which the bench and tests use; barrel imports are getter
+  chains: read them into module-level consts once).
+- No `Math.hypot` (slow): use `Math.sqrt` of explicit products. Compare squared distances against squared
+  thresholds (`distanceSq`, `MIN_LENGTH_SQ`); take a sqrt only when the actual length is needed.
 - Comments explain _why_ and the algorithm, citing Golodetz / Teller / Quake where relevant.
 
 ## Gotchas

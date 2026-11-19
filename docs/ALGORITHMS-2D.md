@@ -101,6 +101,8 @@ report it plus everything reachable from it (Quake's outside flood), but keep co
 
 ## 4. Base vis (`shared/core/vis/baseVis.ts`)
 
+The pair test runs on flat typed arrays (`portals/flat.ts`, `flatMightSeeRow`); same verdicts as `portalMightSeePortal`.
+
 Cheap conservative "might see" set per portal *i* (Golodetz Listings 4–5):
 
 1. *j* must be partly in front of *i*;
@@ -108,6 +110,9 @@ Cheap conservative "might see" set per portal *i* (Golodetz Listings 4–5):
 3. flood fill from `i.to` along portals passing 1 and 2.
 
 ## 5. Portal flow (`shared/core/vis/portalFlow.ts`, `d2/core/vis/antipenumbra.ts`)
+
+Implemented twice with identical results: the object walk (`portalFlow.ts`, reference) and the flat one used by
+default (`vis/flatFlow.ts` + `d2/core/vis/flatKernel.ts`, phase 6b).
 
 Depth-first walk from each source portal *S* through the graph, carrying:
 

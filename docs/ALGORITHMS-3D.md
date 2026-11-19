@@ -101,10 +101,15 @@ report it plus everything reachable from it, but keep compiling.
 
 ## 4. Base vis (`shared/core/vis/baseVis.ts`)
 
+The pair test runs on flat typed arrays (`portals/flat.ts`, `flatMightSeeRow`); same verdicts as `portalMightSeePortal`.
+
 Unchanged: per portal *i*, the portals *j* partly in front of *i* with *i* partly behind *j*,
 flood-filled from `i.to` (Golodetz Listings 4–5).
 
 ## 5. Portal flow (`shared/core/vis/portalFlow.ts`, `d3/core/vis/antipenumbra.ts`)
+
+Implemented twice with identical results: the object walk (`portalFlow.ts`, reference) and the flat one used by
+default (`vis/flatFlow.ts` + `d3/core/vis/flatKernel.ts`, phase 6b).
 
 The same depth-first walk as in 2D, carrying `source`, `pass` and `might`. For each generator
 portal *G*: clip `source` to the back of *G*; clip *G* to the front of *S*; clip *G* by the

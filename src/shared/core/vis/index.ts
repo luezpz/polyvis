@@ -13,3 +13,4 @@ export * from "./pvsClusters";
 export * from "./portalMatch";
 export * from "./incrementalFlow";
 export * from "./incrementalBaseVis";
+export * from "./flatKernel";

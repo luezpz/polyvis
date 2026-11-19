@@ -48,6 +48,8 @@ only decisions, gotchas and open items. The 2D/3D merge (former PLAN.md / PROGRE
   one thread. Node threads (`npm run bench -- --threads n --repeat 4`), base vis ms 1 → 4 → 8
   threads: 2D Maze 16x16 983 → 359 → 290, 2D Grid city 238 → 75 → 69, 3D Grid city 636 → 262 →
   164, 3D Pillar forest 175 → 81 → 72; levels under ~550 portals unchanged (stay local).
+  Those numbers predate the flat pair test (phase 6a, 5–12× cheaper pairs): `MIN_PAIRS_PER_THREAD` is
+  likely too low now (the flood and messaging dominate); re-measure with `--threads` before trusting it.
   Rows are copied out of the packed buffer (`baseVisFromWords`): views would each clone the
   whole buffer when the result is posted to the editor.
 - Editors share one nested pool (`shared/app/compile/workerPool.ts`, entry `poolWorker.ts`).
@@ -128,6 +130,10 @@ only decisions, gotchas and open items. The 2D/3D merge (former PLAN.md / PROGRE
   bindings resolved through getters) as a large self-time entry: a bench artifact, absent in bundles.
 - The flow's separator cache (1b) relies on `clipFacet` returning the **same object** when nothing
   is cut (both kernels do); `Geometry.separators` must list planes in `clipToSeparators` order.
+- Flow runs on flat arrays (phase 6b, `vis/flatFlow.ts`, `Geometry.flatFlow`); the object walk in
+  `portalFlow.ts` is kept as the exact reference (`flat: false`). A change to flow semantics must land in
+  both, and in both kernels' `flatKernel.ts` (bit-identical to `clipWinding` / `clipSegmentFront` /
+  separators); `tests/shared/flatFlow.test.ts` catches drift.
 - Git history of the source repos (`polyvis2d` cdac3e9, `polyvis3d` 2de2526) was not carried over.
 
 ## Open TODOs

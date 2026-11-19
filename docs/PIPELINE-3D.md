@@ -397,7 +397,7 @@ File: `src/shared/core/portals/leaks.ts`
 
 ## 10. Base vis
 
-File: `src/shared/core/vis/baseVis.ts` (Golodetz, listings 4–5)
+File: `src/shared/core/vis/baseVis.ts` (Golodetz, listings 4–5); pair test on flat arrays (`flatMightSeeRow`)
 
 ```text
 1  for each portal i:
@@ -416,7 +416,7 @@ File: `src/shared/core/vis/baseVis.ts` (Golodetz, listings 4–5)
 
 ## 11. Portal flow
 
-File: `src/shared/core/vis/portalFlow.ts` (Teller; Quake `vis`)
+File: `src/shared/core/vis/portalFlow.ts` (Teller; Quake `vis`); default run on flat arrays: `vis/flatFlow.ts`
 
 ```text
  1  order = portals sorted by |mightSee| ascending
@@ -479,7 +479,7 @@ File: `src/shared/core/vis/parallelFlow.ts`
 
 ## 12. Separators (antipenumbra)
 
-File: `src/d3/core/vis/antipenumbra.ts` (Golodetz listing 2; Quake `ClipToSeperators`)
+File: `src/d3/core/vis/antipenumbra.ts` (Golodetz listing 2; Quake `ClipToSeperators`); flat twin: `src/d3/core/vis/flatKernel.ts`
 
 ```text
  1  function clipToSeparators(A, B, target):

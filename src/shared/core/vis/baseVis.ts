@@ -16,7 +16,7 @@
 
 import type { Dim, Geometry, Vec } from "../geometry";
 import { PLANE_EPSILON, Side } from "../math";
-import type { PortalGraph } from "../portals";
+import { type FlatPortals, type PortalGraph, flattenPortals } from "../portals";
 import { BitSet } from "./bitset";
 import { floodPortals } from "./passages";
 
@@ -104,16 +104,78 @@ export function baseVisFromWords(n: number, words: Uint32Array): BitSet[] {
 export function createBaseVisRows<D extends Dim>(g: Geometry<D>, graph: PortalGraph<D>, useSpheres = true): (p0: number, p1: number) => Uint32Array {
   const n = graph.portals.length, wordsPerRow = (n + 31) >>> 5;
   const spheres = useSpheres ? portalSpheres(g, graph) : null;
+  // 6a: the pair test on flat arrays (same verdicts as `portalMightSeePortal`, ~13× faster).
+  const flat = spheres ? flattenPortals(g, graph, spheres.center, spheres.radius) : null;
   const visitedLeaf = new Uint8Array(graph.leafCount);
   return (p0, p1) => {
     const out = new Uint32Array((p1 - p0) * wordsPerRow);
     const candidate = new BitSet(n);
     for (let i = p0; i < p1; i++) {
       candidate.words.fill(0);
-      for (let j = 0; j < n; j++) if (portalMightSeePortal(g, graph, i, j, spheres)) candidate.set(j);
+      if (flat) flatMightSeeRow(flat, i, candidate.words);
+      else for (let j = 0; j < n; j++) if (portalMightSeePortal(g, graph, i, j, null)) candidate.set(j);
       // Flood through candidate portals starting from the leaf portal i leads into.
       out.set(floodPortals(graph, graph.portals[i].to, candidate, visitedLeaf).words, (i - p0) * wordsPerRow);
     }
     return out;
   };
+}
+
+/**
+ * Phase 6a: sets bit j of `row` (`(⌈n/32⌉,)` words, zeroed) for every portal j that portal i might
+ * see by rules 1 + 2, from {@link FlatPortals}. Same arithmetic and verdicts as
+ * {@link portalMightSeePortal} with spheres: distances are `n·p − d` summed in axis order, and the
+ * `classifyFacet` fallbacks reduce to "some vertex > ε" (rule 1: Front or Spanning) and
+ * "some vertex < −ε" (rule 2: Back or Spanning). Monomorphic per dimension (no `Geometry` calls).
+ */
+export function flatMightSeeRow(fp: FlatPortals, i: number, row: Uint32Array): void {
+  const { plane: P, center: C, radius: R, vertexStart: VS, coords: X, count: n } = fp;
+  const eps = PLANE_EPSILON; // local: module imports are getters under Vite's module runner
+  if (fp.dimension === 2) {
+    const inx = P[3 * i], iny = P[3 * i + 1], id = P[3 * i + 2];
+    const cix = C[2 * i], ciy = C[2 * i + 1], ri = R[i], i0 = VS[i], i1 = VS[i + 1];
+    for (let j = 0; j < n; j++) {
+      if (j === i) continue;
+      // Rule 1: some vertex of j strictly in front of i.
+      const dj = inx * C[2 * j] + iny * C[2 * j + 1] - id, rj = R[j];
+      if (dj + rj <= eps) continue;
+      if (dj - rj <= eps) {
+        let front = false;
+        for (let v = VS[j], e = VS[j + 1]; v < e; v++) if (inx * X[2 * v] + iny * X[2 * v + 1] - id > eps) { front = true; break; }
+        if (!front) continue;
+      }
+      // Rule 2: some vertex of i strictly behind j.
+      const jnx = P[3 * j], jny = P[3 * j + 1], jd = P[3 * j + 2];
+      const di = jnx * cix + jny * ciy - jd;
+      if (di - ri >= -eps) continue;
+      if (di + ri >= -eps) {
+        let back = false;
+        for (let v = i0; v < i1; v++) if (jnx * X[2 * v] + jny * X[2 * v + 1] - jd < -eps) { back = true; break; }
+        if (!back) continue;
+      }
+      row[j >>> 5] |= 1 << (j & 31);
+    }
+    return;
+  }
+  const inx = P[4 * i], iny = P[4 * i + 1], inz = P[4 * i + 2], id = P[4 * i + 3];
+  const cix = C[3 * i], ciy = C[3 * i + 1], ciz = C[3 * i + 2], ri = R[i], i0 = VS[i], i1 = VS[i + 1];
+  for (let j = 0; j < n; j++) {
+    if (j === i) continue;
+    const dj = inx * C[3 * j] + iny * C[3 * j + 1] + inz * C[3 * j + 2] - id, rj = R[j];
+    if (dj + rj <= eps) continue;
+    if (dj - rj <= eps) {
+      let front = false;
+      for (let v = VS[j], e = VS[j + 1]; v < e; v++) if (inx * X[3 * v] + iny * X[3 * v + 1] + inz * X[3 * v + 2] - id > eps) { front = true; break; }
+      if (!front) continue;
+    }
+    const jnx = P[4 * j], jny = P[4 * j + 1], jnz = P[4 * j + 2], jd = P[4 * j + 3];
+    const di = jnx * cix + jny * ciy + jnz * ciz - jd;
+    if (di - ri >= -eps) continue;
+    if (di + ri >= -eps) {
+      let back = false;
+      for (let v = i0; v < i1; v++) if (jnx * X[3 * v] + jny * X[3 * v + 1] + jnz * X[3 * v + 2] - jd < -eps) { back = true; break; }
+      if (!back) continue;
+    }
+    row[j >>> 5] |= 1 << (j & 31);
+  }
 }

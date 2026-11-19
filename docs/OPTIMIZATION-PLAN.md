@@ -540,10 +540,13 @@ Doors must block vis when closed, without rebaking.
 | Phase | Effort | Payoff |
 |---|---|---|
 | BSP splitter sweep (done 2026-11-19, exact, always on) | S | BSP 2D Maze 93 → 31 ms, 3D Maze 78 → 42 ms, 2D Grid city 29 → 17 ms; same trees |
-| flow hot-loop arithmetic (done 2026-11-19, exact) | S | 3D `clipWinding` scratch buffer: flow 3D Pillar forest ~600 → ~430 ms; 2D separators inlined, hypot skipped by a squared pre-check: 2D flow ~2.3× faster (Pillar forest 976 → 416 ms) |
-| 3.5 stable BSP (stable splitter choice, reuse unchanged subtrees) | M–L | BSP is the largest stage on closed levels (2D Maze ~100 ms, 3D Maze ~80 ms); repeatable results across re-imports, and more 3D incremental reuse (Grid city 108 / 252 portals match today) |
-| 1g separator order / early reject | S | targets step 4, the 3D flow hot spot; bench-driven |
-| 1f flat portal storage in workers | M | fewer object reads in the flow; also tells whether WASM is worth it |
+| flow hot-loop arithmetic (done 2026-11-19) | S | 3D `clipWinding` scratch buffer: flow 3D Pillar forest ~600 → ~430 ms; 2D separators inlined: 2D flow ~2.3× faster (Pillar forest 976 → 416 ms) |
+| no `Math.hypot`, squared threshold tests (done 2026-11-19) | S | `sqrt` of explicit products everywhere; `distanceSq` / `MIN_LENGTH_SQ` for comparisons. Bench results unchanged, timings within noise (hot loops already avoided hypot) |
+| 3.5 stable BSP (stable splitter choice, reuse unchanged subtrees) | M–L | after the sweep the BSP is 2D Maze ~30 ms, 3D Maze ~40 ms (3D: region clipping ~46%); repeatable results across re-imports, and more 3D incremental reuse (Grid city 108 / 252 portals match today) |
+| 1g separator order / early reject (measured 2026-11-19: no payoff, closed) | S | step 3 "last rejecter first": identical results, timings within noise; step 4 never rejects (see below), so ordering cannot help |
+| 6a flat base vis (done 2026-11-19, exact) | S | base vis ms: 2D Maze 186 → 16, 2D Pillar forest 151 → 21, 2D Grid city 48 → 25, 3D Pillar forest 44 → 7, 3D Maze 21 → 4; 2D Maze total 298 → 140 |
+| 1f / 6b flat flow (done 2026-11-19, exact) | M | flow ms: 2D Pillar forest 405 → 150, 2D Oblique lattice 190 → 71, 3D Pillar forest 419 → 319, 3D Maze 9 → 11 (noise); totals 2D Pillar forest 579 → 206, 3D 498 → 359 |
+| 6c bench through a bundle (no module-runner getters) | S | bench numbers match production; today imports in hot loops cost up to ~15% of a stage |
 | 4 runtime coherence (reuse last frame's result inside the same leaf, cache static-light results) | S | cuts worst-case frames (planes cam 8–260 µs per query) |
 | 3d hint walls (`hint_` material in the OBJ) | S–M | tighter PVS and faster flow on open levels, placed in Blender |
 | 1a flow half (sphere test before `clipFacet`) | S | doubtful: step 1 almost never rejects |
@@ -558,3 +561,71 @@ over thin fragments. Bit-identical scores (`tests/shared/bspSweep.test.ts`, both
 within the eps band); bench portals and Σ pvs unchanged. Now 3D BSP time: region clipping
 (`clipPolyhedron`, mostly the cap winding) ~46%, scoring ~35%. Making the clip cheaper changes region
 numerics (not bit-identical), so it is left open.
+
+**Flow hot loops and hypot (2026-11-19).** Profiles: 3D flow time is mostly `clipWinding` (a `new Array`
+per call) and separator search; 2D flow was dominated by `Math.hypot` in `buildSeparators`. Fixes: a reused
+scratch `Float64Array` with inlined `signedDistance` in 3D `clipWinding`, inlined line math in 2D
+`buildSeparators`, then `Math.hypot` removed project-wide (`Math.sqrt` of explicit products; squared values for
+threshold tests). Bench portals / Σ portalVis / Σ pvs unchanged on every level. Profiling note: Vite's
+module-runner `get` shows up as large self time in bench profiles; it is a bench artifact.
+
+**1g separator order (2026-11-19): closed, no payoff.** Step 3 with cached separators tried the plane that
+last rejected a generator in the frame first (clip in the original order otherwise, so surviving windings keep
+their bits): bench counters identical, flow ms within noise. Step 4 (`clipToSeparators(g, pass, src)`) outcome
+counts, Pillar forest: 3D 0 rejected / 82016 unchanged / 5460 clipped; 2D 0 / 209781 / 14103. Step 4 never
+rejects and leaves the source unchanged ~94% of the time, so its cost is *confirming* the source is in front
+of every separator; reordering cannot shorten that. What would help instead: a cheap exact proof that the
+source is in front of all (g, pass) separators (none known), or fewer steps (2a / hint walls).
+
+**1f flat storage prototype (2026-11-19).** Captured every `clipToSeparators` call of a 3D Pillar forest flow
+(88445 calls, steps 3 + 4) and replayed them through a flat version (windings as `Float64Array` xyz, pooled
+ping-pong buffers, "unchanged" returned without a copy, same arithmetic as `clipWinding` + `sanitizeWinding`):
+**0 mismatches (bit-identical), object ~158 ms → flat ~93 ms (1.7×)**. These calls are ~40% of that flow (412 ms),
+so flat step 3 + 4 alone would be roughly −15–20% flow; flat steps 1–2 and portal storage add a little more.
+Verdict: object access is a real cost but not most of it; the arithmetic is the bulk, so WASM (phase 5) would
+have to beat flat JS by a wide margin on the remaining ~93 ms to be worth it. Full port = flat facet ops in
+the flow (a flat-winding variant of the Geometry flow primitives, both kernels) + flat portal windings in
+`portals/pack.ts`. Gotcha found: under Vite's module runner (bench, vitest) every read of an imported
+constant goes through a getter; a hot loop reading `PLANE_EPSILON` directly ran 10× slower. Copy imports to
+locals / default params in hot loops (src already does, except `sanitizeWinding`'s per-vertex `MIN_LENGTH_SQ`).
+
+## Phase 6: flat data in the hot paths (review 2026-11-19)
+
+Why flat wins in V8 (more than cache lines): with pointer compression a double field in an object is a
+boxed `HeapNumber`, so `v.x` is two dependent loads (object, box) and every new `Vec` is 1 + 3 allocations;
+a `Float64Array` read is one load from contiguous memory. Generic `g.op(...)` calls add a property load +
+call per primitive and become polymorphic when both kernels run in one process (tests, bench). GC is only
+~3% in profiles, so the win is loads and calls, not collection.
+
+Profiles (`node --cpu-prof scripts/bench.mjs --only ...`, self time): 3D Pillar forest: `forEachSeparator`
+15%, `clipWinding` 7%, `clipToPlanes` 2%, `sanitizeWinding` 2%; 2D Maze: `portalMightSeePortal` 8% of
+the whole run (incl. Vite startup), its `signedDistance` / `dot` 4%.
+
+Prototypes (temporary tests, bit-identical outputs on real inputs):
+
+| kernel | level | object | flat |
+|---|---|---|---|
+| base vis pair test (rules 1 + 2 + spheres) | 2D Maze 16×16, 1428² pairs | 230 ms | 17 ms |
+| `clipToSeparators` replay (steps 3 + 4) | 3D Pillar forest, 88445 calls | 158 ms | 93 ms |
+
+Part of the base-vis gap is bench-only (module-runner getters, ~15% of `portalMightSeePortal`), the rest is
+SoA + no dispatch. Plan, in order:
+- **6a base vis (done 2026-11-19)**: `portals/flat.ts` `FlatPortals` + `flatMightSeeRow` in `vis/baseVis.ts` (one
+  kernel, dimension branch); bench Σ columns unchanged; `tests/shared/baseVisFlat.test.ts` checks every pair of
+  every level, both kernels. Kept separate from `packPortalGraph` (workers rebuild it; cheap). Open: passages'
+  sphere/plane pre-tests on the same store.
+- **6b flow (done 2026-11-19)**: `vis/flatFlow.ts` (the walk; facets on an arena stack, cached separators on a
+  second stack, no per-step allocation) + `Geometry.flatFlow` kernels (`d2|d3/core/vis/flatKernel.ts`, interface
+  `vis/flatKernel.ts`). Option `flat` (default true; false = object path, kept as the test reference).
+  `tests/shared/flatFlow.test.ts`: rows + counters equal on every level × {default, no clipSource, no separator
+  cache, passages}, both kernels. First run was *slower* in 3D (654 ms): the kernels read tolerance constants
+  through the `shared/core` barrel, a getter chain per read under Vite's runner; module-level copies fixed it.
+  Remaining 3D flow time is arithmetic (`separatorPass`, `clipRaw`). Planned as: flat facets through `flowFromSource` (steps 1–4 on pooled per-depth buffers, no per-step
+  allocation), per-dimension flat clip + separator kernels; then flow/passages share them.
+- **6c bench**: run `scripts/bench.ts` from a bundle (esbuild/Rollup) so imported functions/constants are
+  plain bindings; until then, bind imports locally in hot loops.
+- Later, only if profiles say so: BSP region clipping (`clipPolyhedron`, 3D BSP ~46%: faces as flat
+  windings), BSP fragment min/max cached per fragment for scoring. Not worth it: CSG (< 10%), nodes /
+  leaves / BitSet (cold or already typed), editor-side data.
+Not project-wide: the object `Geometry<D>` API stays for cold code, tests and the editors; flat arrays
+live inside the three kernels (base vis, passages, flow) and the worker messages.

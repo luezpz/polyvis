@@ -78,7 +78,7 @@ export function computePortalFlowIncremental<D extends Dim>(g: Geometry<D>, grap
       continue;
     }
     const budget = opts.maxSteps > 0 ? opts.maxSteps - stats.steps : Infinity;
-    const r = flowFromSource(g, graph, mightSee, portalVis, sourceId, opts.clipSource, budget, onChain, null, opts.cacheSeparators, opts.passages);
+    const r = flowFromSource(g, graph, mightSee, portalVis, sourceId, opts.clipSource, budget, onChain, null, opts.cacheSeparators, opts.passages, opts.flat ?? true);
     portalVis[sourceId] = r.vis;
     stats = addSourceStats(stats, r);
   }

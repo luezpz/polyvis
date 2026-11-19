@@ -31,6 +31,7 @@
 import type { Dim, Facet, Geometry, Plane } from "../geometry";
 import type { PortalGraph } from "../portals";
 import { BitSet } from "./bitset";
+import { flowFromSourceFlat } from "./flatFlow";
 import type { PassageTable } from "./passages";
 
 export interface PortalFlowOptions {
@@ -58,6 +59,8 @@ export interface PortalFlowOptions {
    * steps (and change the result); base order gives the plain flow's result with fewer steps.
    */
   readonly orderBy: readonly BitSet[] | null;
+  /** Phase 6b: run the walk on flat arrays (`flatFlow.ts`). Exact (same result); false: object path, for tests. */
+  readonly flat?: boolean;
 }
 
 export const DEFAULT_PORTAL_FLOW_OPTIONS: PortalFlowOptions = Object.freeze({
@@ -66,6 +69,7 @@ export const DEFAULT_PORTAL_FLOW_OPTIONS: PortalFlowOptions = Object.freeze({
   cacheSeparators: true,
   passages: null,
   orderBy: null,
+  flat: true,
 });
 
 export interface PortalFlowStats {
@@ -131,9 +135,10 @@ export function portalFlowOrder(mightSee: readonly BitSet[]): number[] {
  * `onChain`: scratch, `graph.leafCount` zeros; left zeroed on return.
  * `rank`: position of each portal in the flow order, or null. When given, `known[j]` is only used if
  * `rank[j] < rank[sourceId]`, so the result is the single-threaded one even if `known` holds later rows.
- * `cacheSeparators`, `passages`: see {@link PortalFlowOptions}.
+ * `cacheSeparators`, `passages`, `flat`: see {@link PortalFlowOptions}.
  */
-export function flowFromSource<D extends Dim>(geometry: Geometry<D>, graph: PortalGraph<D>, mightSee: readonly BitSet[], known: readonly (BitSet | undefined)[], sourceId: number, clipSource: boolean, budget: number, onChain: Uint8Array, rank: Int32Array | null = null, cacheSeparators = true, passages: PassageTable | null = null): SourceFlow {
+export function flowFromSource<D extends Dim>(geometry: Geometry<D>, graph: PortalGraph<D>, mightSee: readonly BitSet[], known: readonly (BitSet | undefined)[], sourceId: number, clipSource: boolean, budget: number, onChain: Uint8Array, rank: Int32Array | null = null, cacheSeparators = true, passages: PassageTable | null = null, flat = true): SourceFlow {
+  if (flat) return flowFromSourceFlat(geometry, graph, mightSee, known, sourceId, clipSource, budget, onChain, rank, cacheSeparators, passages);
   // Hot loop: bind the geometry operations once.
   const { clipFacet, flipPlane, clipToSeparators, separators, clipFacetToPlanes } = geometry;
   const { portals, portalsFrom } = graph;
@@ -239,7 +244,7 @@ export function computePortalFlow<D extends Dim>(geometry: Geometry<D>, graph: P
       continue;
     }
     const budget = opts.maxSteps > 0 ? opts.maxSteps - stats.steps : Infinity;
-    const r = flowFromSource(geometry, graph, mightSee, portalVis, sourceId, opts.clipSource, budget, onChain, null, opts.cacheSeparators, opts.passages);
+    const r = flowFromSource(geometry, graph, mightSee, portalVis, sourceId, opts.clipSource, budget, onChain, null, opts.cacheSeparators, opts.passages, opts.flat ?? true);
     portalVis[sourceId] = r.vis;
     stats = addSourceStats(stats, r);
   }

@@ -24,6 +24,8 @@
  * once; only new *geometric* primitives need a 2D and a 3D implementation.
  */
 
+import type { FlatFlowKernel } from "./vis/flatKernel";
+
 import type { Side } from "./math";
 
 /** Oriented plane in Hessian normal form: points `p` with `dot(n, p) = d`; `n` is unit and points to the front. */
@@ -147,4 +149,9 @@ export interface Geometry<D extends Dim> {
    * it is in front of every plane. Null if the eye lies on the facet's plane (edge-on: no cone).
    */
   portalFrustum(eye: Vec<D>, facet: Facet<D>): Plane<D>[] | null;
+  /**
+   * Phase 6b: `clipFacet`, `separators`, `clipFacetToPlanes`, `clipToSeparators` on flat arrays,
+   * bit-identical to the object versions (the flow's hot path; see `vis/flatKernel.ts`).
+   */
+  readonly flatFlow: FlatFlowKernel;
 }
