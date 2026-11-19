@@ -27,26 +27,34 @@
  * edges of `to` × vertices of `from` (Golodetz, Listing 2); see `d3/core/vis/antipenumbra.ts`.
  */
 
-import { type Line2, type Segment, type Vec2, distance, flipLine, lineFromPoints, signedDistance, clipSegmentFront, MIN_LENGTH, PLANE_EPSILON } from "../math";
+import { type Line2, type Segment, type Vec2, clipSegmentFront, MIN_LENGTH, PLANE_EPSILON } from "../math";
 
 /**
  * Builds the separating lines between `from` and `to`, oriented so that `to`
  * (and therefore the region beyond it, as seen from `from`) is in front.
  */
 export function buildSeparators(from: Segment, to: Segment, eps = PLANE_EPSILON): Line2[] {
+  // Hot loop: the arithmetic of distance / lineFromPoints / signedDistance / flipLine, inlined (same bits).
   const fv: readonly Vec2[] = [from.a, from.b];
   const tv: readonly Vec2[] = [to.a, to.b];
   const out: Line2[] = [];
+  const nearSq = 4 * MIN_LENGTH * MIN_LENGTH;
   for (let i = 0; i < 2; i++) {
     for (let j = 0; j < 2; j++) {
       const p = fv[i], q = tv[j];
-      if (distance(p, q) < MIN_LENGTH) continue; // portals share this vertex: no separator through it
-      const line = lineFromPoints(p, q);
-      if (!line) continue;
-      const dFrom = signedDistance(line, fv[1 - i]);
-      const dTo = signedDistance(line, tv[1 - j]);
-      if (dFrom < -eps && dTo > eps) out.push(line);
-      else if (dFrom > eps && dTo < -eps) out.push(flipLine(line));
+      const ex = q.x - p.x, ey = q.y - p.y;
+      // Portals share this vertex: no separator through it. Squared pre-check skips most hypot calls (decision unchanged).
+      if (ex * ex + ey * ey < nearSq && Math.hypot(p.x - q.x, p.y - q.y) < MIN_LENGTH) continue;
+      const len = Math.hypot(-ey, ex);
+      if (!(len > 0)) continue;
+      const nx = -ey / len, ny = ex / len;
+      if (nx === 0 && ny === 0) continue;
+      const d = nx * p.x + ny * p.y;
+      const f = fv[1 - i], t = tv[1 - j];
+      const dFrom = nx * f.x + ny * f.y - d;
+      const dTo = nx * t.x + ny * t.y - d;
+      if (dFrom < -eps && dTo > eps) out.push({ n: { x: nx, y: ny }, d });
+      else if (dFrom > eps && dTo < -eps) out.push({ n: { x: -nx, y: -ny }, d: -d });
       // Otherwise both remaining endpoints are on the same side (or on the line): not a separator.
     }
   }
