@@ -25,6 +25,7 @@
 import type { Bounds, Cell, Dim, Facet, Geometry, Plane } from "../geometry";
 import { Side } from "../math";
 import type { Wall } from "../wall";
+import { SWEEP_MIN_GROUP, sweepScores } from "./sweep";
 import { type RefineOptions, type RefineWall, chooseRefineSplit, refinementEnabled, prepareRefineWalls } from "./refine";
 import { type BspLeaf, type BspNode, type BspStats, type BspTree, type ChildRef, type LeafContents, BOUNDS_TAG, isLeafRef, leafRef, refToLeaf } from "./types";
 
@@ -285,14 +286,25 @@ function chooseSplitter<D extends Dim>(g: Geometry<D>, frags: readonly Fragment<
  *   score = splitWeight·splits + balanceWeight·|front − back| − facingWeight·onPlane,
  * `onPlane` = fragments with the candidate's plane id (consumed by the node). Scoring candidate chunks separately and
  * keeping the lowest score (ties: earliest chunk) gives the same choice.
+ * `useSweep` (default true): score large groups of parallel candidates at once (`sweep.ts`, exact: same scores);
+ * false keeps the per-candidate loop (reference for tests).
  */
-export function scoreSplitters<D extends Dim>(g: Geometry<D>, frags: readonly Fragment<D>[], candidates: readonly number[], planes: readonly Plane<D>[], opts: BspBuildOptions): SplitChoice {
+export function scoreSplitters<D extends Dim>(g: Geometry<D>, frags: readonly Fragment<D>[], candidates: readonly number[], planes: readonly Plane<D>[], opts: BspBuildOptions, useSweep = true): SplitChoice {
   let best = candidates[0];
   let bestScore = Infinity;
   const facing = opts.facingWeight ?? 0;
   const onPlane = new Map<number, number>();
   if (facing) for (const f of frags) onPlane.set(f.plane, (onPlane.get(f.plane) ?? 0) + 1);
+  const swept = useSweep && candidates.length >= SWEEP_MIN_GROUP ? sweepScores(g, frags, candidates, planes, opts) : null;
   for (const planeIndex of candidates) {
+    const known = swept?.get(planeIndex);
+    if (known !== undefined) {
+      if (known < bestScore) {
+        bestScore = known;
+        best = planeIndex;
+      }
+      continue;
+    }
     const plane = planes[planeIndex];
     const bonus = facing * (onPlane.get(planeIndex) ?? 0);
     let front = 0, back = 0, splits = 0;
