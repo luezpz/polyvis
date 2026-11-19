@@ -20,6 +20,7 @@
 import type { Dim, Geometry, Plane } from "../geometry";
 import { PLANE_EPSILON } from "../math";
 import type { BspBuildOptions, Fragment } from "./build";
+import { balanceQuantum, splitterScore } from "./score";
 
 /** Smallest group of parallel candidates worth a sweep (below it the per-candidate loop with early-out wins). */
 export const SWEEP_MIN_GROUP = 4;
@@ -104,6 +105,7 @@ function scoreGroup<D extends Dim>(
   thin.sort((a, b) => lo[a] - lo[b]);
   const thinLo = Float64Array.from(thin, (i) => lo[i]);
   const facing = opts.facingWeight ?? 0;
+  const q = balanceQuantum(count);
 
   group.members.forEach((c, k) => {
     const flipped = group.flipped[k];
@@ -132,7 +134,6 @@ function scoreGroup<D extends Dim>(
     }
     const nFront = flipped ? anyBack : anyFront;
     const nBack = (flipped ? anyFront : anyBack) + onOpposite;
-    const bonus = facing * (facing ? own.length : 0);
-    scores.set(c, splits * opts.splitWeight + Math.abs(nFront - nBack) * opts.balanceWeight - bonus);
+    scores.set(c, splitterScore(splits, nFront, nBack, facing ? own.length : 0, q, opts));
   });
 }

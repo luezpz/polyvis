@@ -403,8 +403,7 @@ Left open, bench-driven: 1a flow half, 1c, 1f, 1g. The 3D flow is now dominated 
   ~100 ms, 3D Maze ~80 ms).
   **Paused here (2026-11-19): editor turnaround is low priority.** Open, if resumed: (1) wire `compileSession` into the editors' compile worker
   (it is single-threaded: either use it only for small edits, or feed reused rows to the parallel
-  runners as pre-finished sources); (2) a stable/incremental BSP (reuse subtrees whose fragments
-  are unchanged; a stable splitter choice so a local edit does not reshuffle the root splits).
+  runners as pre-finished sources); ~~(2) a stable/incremental BSP~~ done, see "Stable BSP" under Leftovers.
 
 ## Phase 4: runtime portal clipping (Doom 3, PVS as prefilter)
 
@@ -530,7 +529,7 @@ Doors must block vis when closed, without rebaking.
 | 3c column sharing (done in core; export v3 open) | S | rows 1.2–6× narrower, lossless |
 | 1d allocation-free bitsets, 1e early-out (done) | S | flow −10–17% |
 | 3e convex leaf clusters (done, option) | S–M | flow up to 2× faster, Σ pvs +10–100%: draft bakes |
-| 3.5 CSG BVH (done), incremental base vis + flow (done in core, `compileSession`) | M | CSG up to 28× faster; closed levels recompile 2× faster after an edit; editor wiring + stable BSP open |
+| 3.5 CSG BVH (done), incremental base vis + flow (done in core, `compileSession`) | M | CSG up to 28× faster; closed levels recompile 2× faster after an edit; stable BSP done (below); editor wiring open |
 | 4 runtime clipping (done: planes + rect modes, culling, typed-array + v3 file export, editor layer) | L | runtime culling: e.g. PVS 46 → 7 leaves |
 | 4b occluding doors (done for brushes; OBJ doors open) | M | closed doors hide rooms, no rebake |
 | 3a (no-op on leaves) | S | none on the bench levels |
@@ -542,7 +541,7 @@ Doors must block vis when closed, without rebaking.
 | BSP splitter sweep (done 2026-11-19, exact, always on) | S | BSP 2D Maze 93 → 31 ms, 3D Maze 78 → 42 ms, 2D Grid city 29 → 17 ms; same trees |
 | flow hot-loop arithmetic (done 2026-11-19) | S | 3D `clipWinding` scratch buffer: flow 3D Pillar forest ~600 → ~430 ms; 2D separators inlined: 2D flow ~2.3× faster (Pillar forest 976 → 416 ms) |
 | no `Math.hypot`, squared threshold tests (done 2026-11-19) | S | `sqrt` of explicit products everywhere; `distanceSq` / `MIN_LENGTH_SQ` for comparisons. Bench results unchanged, timings within noise (hot loops already avoided hypot) |
-| 3.5 stable BSP (stable splitter choice, reuse unchanged subtrees) | M–L | after the sweep the BSP is 2D Maze ~30 ms, 3D Maze ~40 ms (3D: region clipping ~46%); repeatable results across re-imports, and more 3D incremental reuse (Grid city 108 / 252 portals match today) |
+| 3.5 stable BSP (done 2026-11-19, exact) | M | portals matching after an edit 84.2 → 91.6% (3D), 87.0 → 93.9% (2D); session BSP 2D Maze 39 → 19 ms, 3D Maze 47 → 19 ms; trees no longer depend on wall order (see below) |
 | 1g separator order / early reject (measured 2026-11-19: no payoff, closed) | S | step 3 "last rejecter first": identical results, timings within noise; step 4 never rejects (see below), so ordering cannot help |
 | 6a flat base vis (done 2026-11-19, exact) | S | base vis ms: 2D Maze 186 → 16, 2D Pillar forest 151 → 21, 2D Grid city 48 → 25, 3D Pillar forest 44 → 7, 3D Maze 21 → 4; 2D Maze total 298 → 140 |
 | 1f / 6b flat flow (done 2026-11-19, exact) | M | flow ms: 2D Pillar forest 405 → 150, 2D Oblique lattice 190 → 71, 3D Pillar forest 419 → 319, 3D Maze 9 → 11 (noise); totals 2D Pillar forest 579 → 206, 3D 498 → 359 |
@@ -561,6 +560,54 @@ over thin fragments. Bit-identical scores (`tests/shared/bspSweep.test.ts`, both
 within the eps band); bench portals and Σ pvs unchanged. Now 3D BSP time: region clipping
 (`clipPolyhedron`, mostly the cap winding) ~46%, scoring ~35%. Making the clip cheaper changes region
 numerics (not bit-identical), so it is left open.
+
+**Stable BSP (2026-11-19).** Measured first: portals of a fresh compile after an edit whose exact key
+(`portalMatch.ts`) also exists before it, over every level × 3 edits (push a face of the first / middle
+solid by 0.1, drop the last solid). Three causes, three fixes:
+1. *Bounds moved* (3D Tower, Two storeys): every region is the root box clipped by its ancestors, so a
+   bounds change renumbers every leaf. `snapBounds` grows the box to a grid of step 2^⌈log2 E⌉/16, offset by
+   half a step so authored (grid) coordinates never sit on a snap line.
+2. *Wall planes refitted* (3D Round room: 0 / 90 matched): 3D CSG fitted each wall's plane to its
+   fragment, so noise depended on how the face was cut. Walls now keep the brush face's plane.
+3. *Splitter order* depended on wall order (first-appearance candidates, ties to the first). Candidates are
+   now scanned in canonical plane order (`planeRanks`: n then d, exact), so the tree is a function of the
+   geometry (test: reversed walls give the same tree).
+
+4. *Near-equal balance* at big nodes: |front − back| is rounded down to 2^⌊log2(n/32)⌋ (`bsp/score.ts`), so
+   ±1 count changes tie and the canonical order decides. Helps 3D (90.2 → 91.6%), costs 2D (95.4 → 93.9%,
+   slightly bigger trees); kept, 3D is the product. 3D bench counters are unchanged by it.
+Matching (all levels × 3 edits, 3D without Oblique lattice): 3D 84.2 → 91.6%, 2D 87.0 → 93.9%.
+What remains is near-ties at the top (3D Grid city root: four planes at score 42; an edit adds 3
+fragments and another wins) and genuine score changes (3D Pillar forest: the edit removes a split).
+Hysteresis (keep last build's splitter while near-best) would fix those but makes a session compile differ
+from a fresh one; not done.
+
+Subtree reuse, `bsp/incremental.ts` (`buildBspIncremental`, used by `compileSession`): a node's subtree is
+a function of its fragments and its region, and the region of (bounds, ancestor path). Node key = bounds +
+path of (plane, side) + the sorted session ids of its fragments (an id names an exact wall, or a side of a
+split of an id by a plane). In preorder a subtree is a contiguous node range and leaf range, so a hit copies
+the old slice with refs shifted and plane indices / region tags remapped by exact plane numbers (−0 kept
+apart from 0: `String(-0)` is "0", a real bug the tests caught). Equal to `buildBsp` (`toEqual`, every
+edit, both kernels: `tests/shared/stableBsp.test.ts`). Off with refinement (it reads every wall).
+One edit (face 1 of the middle solid / room by 0.1), warm, ms incremental / fresh:
+
+| level | BSP nodes reused | bsp ms | portals | base vis reused | flow reused |
+|---|---|---|---|---|---|
+| 2d/Maze 16×16 | 1467 / 1478 | 19 / 39 | 1420 | 1420 | 1420 |
+| 2d/Grid city 8×8 | 493 / 503 | 5 / 9 | 640 | 640 | 640 |
+| 2d/Pillar forest | 448 / 458 | 7 / 11 | 1260 | 545 | 656 |
+| 2d/Oblique lattice | 224 / 252 | 17 / 20 | 822 | 252 | 281 |
+| 3d/Maze 10×10 | 892 / 904 | 19 / 47 | 396 | 396 | 396 |
+| 3d/Grid city 6×6 | 0 / 449 | 26 / 23 | 252 | 0 | 0 |
+| 3d/Pillar forest | 0 / 299 | 16 / 13 | 582 | 12 | 12 |
+| 3d/Tower | 126 / 141 | 4 / 7 | 166 | 128 | 128 |
+
+The keys cost ~15% when nothing is reused (root flipped). Fresh builds change trees (new tie order, bounds
+and balance buckets); `npm run bench`, same session, portals / Σ pvs before → after: 2D Grid city 630 → 640 / 11699 →
+12284 (+5%), 2D Maze 1428 → 1476 / 10629 → 10650, 2D Pillar forest 1234 → 1260 / 69682 → 71236 (+2%),
+2D Oblique lattice 824 → 810 / 20754 → 21138, 3D Grid city 252 → 254 / 2514 → 2571 (+2%), 3D Tower
+152 → 166 / 685 → 753 (+10%), 3D Pillar forest 528 → 578 / 17517 → 16296 (−7%); others identical.
+Timings within noise (tie order is arbitrary either way; these are luck, not a trend).
 
 **Flow hot loops and hypot (2026-11-19).** Profiles: 3D flow time is mostly `clipWinding` (a `new Array`
 per call) and separator search; 2D flow was dominated by `Math.hypot` in `buildSeparators`. Fixes: a reused

@@ -72,9 +72,12 @@ export function makeEmptySpaceTest(brushes: readonly Brush[]): EmptySpaceTest {
   return (p) => inside(rooms, p) && !inside(solids, p);
 }
 
-/** Creates a wall from a winding (empty space in front). Returns null for degenerate windings. */
-export function makeWall(winding: Winding, sourceId = -1): Wall | null {
-  const plane = windingPlane(winding);
+/**
+ * Creates a wall from a winding (empty space in front). `known`: the wall's plane if exact (a brush
+ * face's), else it is fitted to the winding. Returns null for degenerate windings.
+ */
+export function makeWall(winding: Winding, sourceId = -1, known?: Plane3): Wall | null {
+  const plane = known ?? windingPlane(winding);
   if (!plane || windingArea(winding) < MIN_AREA) return null;
   return { winding, plane, sourceId };
 }
@@ -147,7 +150,9 @@ function classifyPiece(w: Winding, facePlane: Plane3, brushId: number, isEmpty: 
   const emptyFront = isEmpty(addScaled(c, facePlane.n, PROBE_OFFSET));
   const emptyBack = isEmpty(addScaled(c, facePlane.n, -PROBE_OFFSET));
   if (emptyFront === emptyBack) return null;
-  return makeWall(emptyFront ? w : reverseWinding(w), brushId);
+  // The brush face's plane, not one refit to the piece: refitting adds noise that depends on how the
+  // face was fragmented, so an edit elsewhere would change this wall's plane (stable BSP, phase 3.5).
+  return makeWall(emptyFront ? w : reverseWinding(w), brushId, emptyFront ? facePlane : flipPlane(facePlane));
 }
 
 interface PlaneGroup {
@@ -178,7 +183,7 @@ function dedupe(walls: readonly Wall[]): Wall[] {
       if (pieces.length === 0) break;
     }
     for (const p of pieces) {
-      const piece = makeWall(p, w.sourceId);
+      const piece = makeWall(p, w.sourceId, w.plane);
       if (!piece) continue;
       out.push(piece);
       group.accepted.push({ winding: p, box: windingAabb(p) });

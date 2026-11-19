@@ -32,7 +32,8 @@ src/shared/core/      dimension-agnostic compiler, generic over D extends Dim
   geometry.ts         THE SEAM: Geometry<D> interface every stage is written against
   math/               tolerances, Side
   wall.ts             Wall<D> (BSP input)
-  bsp/                build (subtree tasks + assembly), splitter sweep (exact batch scoring), parallel build, pack (flat worker
+  bsp/                build (subtree tasks + assembly, canonical splitter order, snapped bounds), splitter sweep (exact batch
+                      scoring), incremental (session subtree reuse, phase 3.5), parallel build, pack (flat worker
                       messages), refine (corner/size splits), query, leaf surfaces, types
   portals/            Portal<D>/PortalGraph<D> types, components, leak detection, pack (flat worker messages),
                       flat (FlatPortals: SoA typed arrays for hot vis kernels, phase 6a),

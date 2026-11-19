@@ -147,7 +147,7 @@ export async function buildBspParallel<D extends Dim>(g: Geometry<D>, walls: rea
 
   /** Splitter for a big node: every worker scores one chunk (and so learns the node's fragments). */
   const choose = async (source: FragmentSource, frags: readonly Fragment<D>[]): Promise<number> => {
-    const candidates = splitCandidates(frags, opts.maxCandidates);
+    const candidates = splitCandidates(frags, ctx.planeRank, opts.maxCandidates);
     const size = Math.ceil(candidates.length / workers.length);
     // Sent past the queue: all workers must see this node before any of its children.
     const choices = await Promise.all(workers.map((w, i) => w.score(source, candidates.slice(i * size, (i + 1) * size))));

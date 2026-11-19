@@ -39,7 +39,7 @@ function checkTree<D extends Dim>(g: Geometry<D>, walls: readonly Wall<D>[], opt
   let nodes = 0, compared = 0;
   const visit = (frags: readonly Fragment<D>[]): void => {
     if (frags.length === 0 || nodes++ >= maxNodes) return;
-    const candidates = splitCandidates(frags);
+    const candidates = splitCandidates(frags, ctx.planeRank);
     const swept = sweepScores(g, frags, candidates, planes, opts);
     for (const [c, score] of swept) {
       expect(score, `candidate ${c}`).toBe(scoreSplitters(g, frags, [c], planes, opts, false).score);

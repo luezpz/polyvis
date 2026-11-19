@@ -7,7 +7,7 @@
  * stages that are geometry-specific (level → walls, portal discovery).
  */
 
-import { type BspBuildOptions, type BspBuildResult, type BspStats, type BspTree, type LeafSurface, buildBsp, buildLeafSurfaces } from "./bsp";
+import { type BspBuildOptions, type BspBuildResult, type BspStats, type BspCache, type BspTree, type LeafSurface, buildBsp, buildBspIncremental, buildLeafSurfaces } from "./bsp";
 import { type DoorInfo, type DoorVolume, findDoors, splitLeavesByDoors } from "./doors";
 import type { Dim, Geometry } from "./geometry";
 import { type BoundaryPiece, type ClusterOptions, type LeakReport, type PortalGraph, buildLeafClusters, detectLeaks } from "./portals";
@@ -139,8 +139,10 @@ export interface Compiler<D extends Dim, L> {
   session(): CompileSession<D, L>;
 }
 
-/** Rows a session compile took from the previous one (counts over the vis graph's portals). */
+/** What a session compile took from the previous one: BSP nodes, and base vis rows / flow sources. */
 export interface SessionReuse {
+  /** BSP nodes copied from the previous tree (`buildBspIncremental`). */
+  readonly bspNodes: number;
   readonly baseVis: number;
   readonly flow: number;
 }
@@ -283,6 +285,7 @@ export function createCompiler<D extends Dim, L>(config: CompilerConfig<D, L>): 
   };
 
   const session = (): CompileSession<D, L> => {
+    let bspCache: BspCache<D> | null = null;
     let baseCache: BaseVisCache<D> | null = null;
     let flowCache: FlowCache<D> | null = null;
     return {
@@ -291,7 +294,9 @@ export function createCompiler<D extends Dim, L>(config: CompilerConfig<D, L>): 
         const timings: StageTiming[] = [];
         const walls = timed(timings, "csg", () => config.levelWalls(level));
         const detailWalls = levelDetailWalls(level, timings);
-        const bsp = timed(timings, "bsp", () => buildBsp(g, walls, bspOptions(opts)));
+        const inc = timed(timings, "bsp", () => buildBspIncremental(g, walls, bspOptions(opts), bspCache));
+        bspCache = inc.cache;
+        const bsp = inc.result;
         const portals = throughPortals(walls, bsp, opts, timings, levelDoors(level));
         const ids = timed(timings, "portal keys", () => portalKeyIds(g, portals.visGraph));
         const bv = timed(timings, "base vis", () => computeBaseVisIncremental(g, portals.visGraph, baseCache, ids));
@@ -301,7 +306,7 @@ export function createCompiler<D extends Dim, L>(config: CompilerConfig<D, L>): 
         const pre = withPassages(base, passages, timings);
         const flow = timed(timings, "portal flow", () => computePortalFlowIncremental(g, pre.visGraph, pre.mightSee, flowOptions(opts, pre), flowCache, ids));
         flowCache = flow.cache;
-        return { result: { ...afterFlow(pre, flow, opts, timings), detailWalls }, reused: { baseVis: bv.reused, flow: flow.reused } };
+        return { result: { ...afterFlow(pre, flow, opts, timings), detailWalls }, reused: { bspNodes: inc.reusedNodes, baseVis: bv.reused, flow: flow.reused } };
       },
     };
   };

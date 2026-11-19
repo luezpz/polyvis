@@ -21,7 +21,7 @@ describe("incremental base vis + flow (phase 3.5, 2D)", () => {
       const s = compileSession();
       const a = s.compileLevel(sample.create());
       const b = s.compileLevel(sample.create());
-      expect(b.reused).toEqual({ baseVis: b.result.graph.portals.length, flow: b.result.graph.portals.length });
+      expect(b.reused).toEqual({ bspNodes: b.result.tree.nodes.length, baseVis: b.result.graph.portals.length, flow: b.result.graph.portals.length });
       expect(rows(b.result)).toEqual(rows(a.result));
     });
     for (const [name, edit] of edits) for (const options of modes) {

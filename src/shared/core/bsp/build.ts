@@ -25,6 +25,7 @@
 import type { Bounds, Cell, Dim, Facet, Geometry, Plane } from "../geometry";
 import { Side } from "../math";
 import type { Wall } from "../wall";
+import { balanceQuantum, splitterScore } from "./score";
 import { SWEEP_MIN_GROUP, sweepScores } from "./sweep";
 import { type RefineOptions, type RefineWall, chooseRefineSplit, refinementEnabled, prepareRefineWalls } from "./refine";
 import { type BspLeaf, type BspNode, type BspStats, type BspTree, type ChildRef, type LeafContents, BOUNDS_TAG, isLeafRef, leafRef, refToLeaf } from "./types";
@@ -51,9 +52,9 @@ export interface Fragment<D extends Dim> {
   readonly plane: number;
 }
 
-interface Partition<D extends Dim> {
-  readonly front: Fragment<D>[];
-  readonly back: Fragment<D>[];
+interface Partition<F> {
+  readonly front: F[];
+  readonly back: F[];
   readonly splits: number;
 }
 
@@ -74,6 +75,8 @@ export interface BuildContext<D extends Dim> {
   readonly rootRegion: Cell<D>;
   readonly refineWalls: readonly RefineWall<D>[];
   readonly opts: BspBuildOptions;
+  /** `planeRank[i]`: position of wall plane i in canonical order ({@link planeRanks}); splitter ties go to the lowest. */
+  readonly planeRank: Int32Array;
 }
 
 /**
@@ -122,10 +125,48 @@ export function prepareBuild<D extends Dim>(g: Geometry<D>, walls: readonly Wall
   const planes: Plane<D>[] = [];
   const fragments: Fragment<D>[] = walls.map((w) => ({ winding: w.winding, plane: internPlane(g, planes, w.plane) }));
   const points = walls.flatMap((w) => g.facetPoints(w.winding));
-  const bounds = g.expandBounds(g.boundsOf(points) ?? { min: g.zero, max: g.zero }, opts.boundsMargin);
+  const bounds = snapBounds(g, g.expandBounds(g.boundsOf(points) ?? { min: g.zero, max: g.zero }, opts.boundsMargin));
   const rootRegion = g.cellFromBounds(bounds, BOUNDS_TAG);
   const refineWalls = refinementEnabled(opts) ? prepareRefineWalls(g, walls) : [];
-  return { planes, fragments, bounds, rootRegion, refineWalls, opts };
+  return { planes, fragments, bounds, rootRegion, refineWalls, opts, planeRank: planeRanks(g, planes) };
+}
+
+/** Bounds snap to multiples of (power of two ≥ largest extent) / this; see {@link snapBounds}. */
+const BOUNDS_GRID_STEPS = 16;
+
+/**
+ * Grows `box` outward to a coarse grid of step q = 2^⌈log2 E⌉ / 16 (E = largest extent):
+ * min → q·(⌊min/q + ½⌋ − 1), max → q·(⌈max/q − ½⌉ + 1), so at least q/2 is added on each side.
+ * Every region is the root box clipped by its ancestors, and clipping interpolates along the box
+ * edges, so moving the box changes every leaf's numbers (and with them every portal's exact key,
+ * see `vis/portalMatch.ts`). Snapped, an edit only moves the bounds when it crosses a half-grid
+ * line; authored levels sit on the grid (min − margin is usually a multiple of q), so the jumps are
+ * off their coordinates (phase 3.5, stable BSP).
+ */
+export function snapBounds<D extends Dim>(g: Geometry<D>, box: Bounds<D>): Bounds<D> {
+  const lo = g.coords(box.min), hi = g.coords(box.max);
+  const extent = Math.max(...hi.map((h, i) => h - lo[i]));
+  if (!(extent > 0)) return box;
+  const q = 2 ** Math.ceil(Math.log2(extent)) / BOUNDS_GRID_STEPS;
+  const at = (c: number[]): D["vec"] => g.vecAt(c, 0);
+  return { min: at(lo.map((x) => (Math.floor(x / q + 0.5) - 1) * q)), max: at(hi.map((x) => (Math.ceil(x / q - 0.5) + 1) * q)) };
+}
+
+/**
+ * `rank[i]` = position of `planes[i]` when sorted by (n coordinates, d), compared exactly.
+ * Splitter candidates are scanned in this order, so the choice (lowest score, ties to the lowest
+ * rank) depends only on the fragments' geometry, not on wall order or plane numbering.
+ */
+export function planeRanks<D extends Dim>(g: Geometry<D>, planes: readonly Plane<D>[]): Int32Array {
+  const keys = planes.map((p) => [...g.coords(p.n), p.d]);
+  const order = planes.map((_, i) => i).sort((a, b) => {
+    const ka = keys[a], kb = keys[b];
+    for (let k = 0; k < ka.length; k++) if (ka[k] !== kb[k]) return ka[k] - kb[k];
+    return a - b;
+  });
+  const rank = new Int32Array(planes.length);
+  order.forEach((p, r) => (rank[p] = r));
+  return rank;
 }
 
 /** The task for the whole tree. */
@@ -172,7 +213,7 @@ export function buildSubtree<D extends Dim>(g: Geometry<D>, ctx: BuildContext<D>
   };
 
   const build = (frags: readonly Fragment<D>[], region: Cell<D> | null, depth: number): ChildRef => {
-    const planeIndex = chooseSplitter(g, frags, ctx.planes, opts);
+    const planeIndex = chooseSplitter(g, frags, ctx);
     const plane = planeAt(planeIndex);
     const part = partition(g, frags, planeIndex, ctx.planes);
     splitCount += part.splits;
@@ -234,7 +275,12 @@ export function assembleTree<D extends Dim>(g: Geometry<D>, ctx: BuildContext<D>
   };
 
   const root = walk(skeleton);
-  const tree: BspTree<D> = { planes, nodes, leaves, root, bounds: ctx.bounds };
+  return treeResult({ planes, nodes, leaves, root, bounds: ctx.bounds }, splitCount, refineSplitCount);
+}
+
+/** Pairs a finished tree with its {@link BspStats}. */
+export function treeResult<D extends Dim>(tree: BspTree<D>, splitCount: number, refineSplitCount: number): BspBuildResult<D> {
+  const { nodes, leaves } = tree;
   const emptyLeafCount = leaves.filter((l) => l.contents === "empty").length;
   return {
     tree,
@@ -259,11 +305,12 @@ function internPlane<D extends Dim>(g: Geometry<D>, planes: Plane<D>[], plane: P
 }
 
 /**
- * Distinct planes among the fragments, in first-appearance order (the splitter candidates); with
- * `maxCandidates` = m < count, the m planes at indices ⌊i·count/m⌋ (deterministic sample).
+ * Distinct planes among the fragments (the splitter candidates), sorted by `rank` (see
+ * {@link planeRanks}); with `maxCandidates` = m < count, the m planes at indices ⌊i·count/m⌋
+ * (deterministic sample).
  */
-export function splitCandidates<D extends Dim>(frags: readonly Fragment<D>[], maxCandidates = 0): number[] {
-  const all = [...new Set(frags.map((f) => f.plane))];
+export function splitCandidates<D extends Dim>(frags: readonly Fragment<D>[], rank: Int32Array, maxCandidates = 0): number[] {
+  const all = [...new Set(frags.map((f) => f.plane))].sort((a, b) => rank[a] - rank[b]);
   if (!(maxCandidates > 0) || all.length <= maxCandidates) return all;
   return Array.from({ length: maxCandidates }, (_, i) => all[Math.floor((i * all.length) / maxCandidates)]);
 }
@@ -274,17 +321,16 @@ export interface SplitChoice {
   readonly score: number;
 }
 
-/** Scores every distinct plane among the fragments and returns the cheapest. */
-function chooseSplitter<D extends Dim>(g: Geometry<D>, frags: readonly Fragment<D>[], planes: readonly Plane<D>[], opts: BspBuildOptions): number {
-  const candidates = splitCandidates(frags, opts.maxCandidates);
-  return candidates.length === 1 ? candidates[0] : scoreSplitters(g, frags, candidates, planes, opts).plane;
+/** Scores every distinct plane among the fragments (non-empty) and returns the cheapest (an index into `ctx.planes`). */
+export function chooseSplitter<D extends Dim>(g: Geometry<D>, frags: readonly Fragment<D>[], ctx: BuildContext<D>): number {
+  const candidates = splitCandidates(frags, ctx.planeRank, ctx.opts.maxCandidates);
+  return candidates.length === 1 ? candidates[0] : scoreSplitters(g, frags, candidates, ctx.planes, ctx.opts).plane;
 }
 
 /**
  * Scores `candidates` (plane indices, non-empty) against `frags` and returns
- * the first one with the lowest score:
- *   score = splitWeight·splits + balanceWeight·|front − back| − facingWeight·onPlane,
- * `onPlane` = fragments with the candidate's plane id (consumed by the node). Scoring candidate chunks separately and
+ * the first one with the lowest {@link splitterScore}; `onPlane` = fragments with the candidate's
+ * plane id (consumed by the node). Scoring candidate chunks separately and
  * keeping the lowest score (ties: earliest chunk) gives the same choice.
  * `useSweep` (default true): score large groups of parallel candidates at once (`sweep.ts`, exact: same scores);
  * false keeps the per-candidate loop (reference for tests).
@@ -293,6 +339,7 @@ export function scoreSplitters<D extends Dim>(g: Geometry<D>, frags: readonly Fr
   let best = candidates[0];
   let bestScore = Infinity;
   const facing = opts.facingWeight ?? 0;
+  const q = balanceQuantum(frags.length);
   const onPlane = new Map<number, number>();
   if (facing) for (const f of frags) onPlane.set(f.plane, (onPlane.get(f.plane) ?? 0) + 1);
   const swept = useSweep && candidates.length >= SWEEP_MIN_GROUP ? sweepScores(g, frags, candidates, planes, opts) : null;
@@ -306,7 +353,8 @@ export function scoreSplitters<D extends Dim>(g: Geometry<D>, frags: readonly Fr
       continue;
     }
     const plane = planes[planeIndex];
-    const bonus = facing * (onPlane.get(planeIndex) ?? 0);
+    const own = onPlane.get(planeIndex) ?? 0;
+    const bonus = facing * own;
     let front = 0, back = 0, splits = 0;
     for (const f of frags) {
       if (f.plane === planeIndex) continue;
@@ -319,7 +367,7 @@ export function scoreSplitters<D extends Dim>(g: Geometry<D>, frags: readonly Fr
       // Early out: this candidate can no longer beat the best one.
       if (splits * opts.splitWeight - bonus >= bestScore) break;
     }
-    const score = splits * opts.splitWeight + Math.abs(front - back) * opts.balanceWeight - bonus;
+    const score = splitterScore(splits, front, back, own, q, opts);
     if (score < bestScore) {
       bestScore = score;
       best = planeIndex;
@@ -329,10 +377,20 @@ export function scoreSplitters<D extends Dim>(g: Geometry<D>, frags: readonly Fr
 }
 
 /** Distributes fragments to the front/back of a plane, consuming same-facing coplanar ones. */
-export function partition<D extends Dim>(g: Geometry<D>, frags: readonly Fragment<D>[], planeIndex: number, planes: readonly Plane<D>[]): Partition<D> {
+export function partition<D extends Dim>(g: Geometry<D>, frags: readonly Fragment<D>[], planeIndex: number, planes: readonly Plane<D>[]): Partition<Fragment<D>> {
+  return partitionWith(g, frags, planeIndex, planes, (f, winding) => ({ winding, plane: f.plane }));
+}
+
+/**
+ * {@link partition} over any fragment type: unsplit fragments are passed through as is, the two
+ * sides of a split `parent` are made by `piece(parent, winding, front)` (front side first).
+ */
+export function partitionWith<D extends Dim, F extends Fragment<D>>(
+  g: Geometry<D>, frags: readonly F[], planeIndex: number, planes: readonly Plane<D>[], piece: (parent: F, winding: Facet<D>, front: boolean) => F,
+): Partition<F> {
   const plane = planes[planeIndex];
-  const front: Fragment<D>[] = [];
-  const back: Fragment<D>[] = [];
+  const front: F[] = [];
+  const back: F[] = [];
   let splits = 0;
   for (const f of frags) {
     if (f.plane === planeIndex) continue; // consumed by this node
@@ -345,8 +403,8 @@ export function partition<D extends Dim>(g: Geometry<D>, frags: readonly Fragmen
       case Side.Spanning: {
         const fw = g.clipFacet(f.winding, plane);
         const bw = g.clipFacet(f.winding, g.flipPlane(plane));
-        if (fw) front.push({ winding: fw, plane: f.plane });
-        if (bw) back.push({ winding: bw, plane: f.plane });
+        if (fw) front.push(piece(f, fw, true));
+        if (bw) back.push(piece(f, bw, false));
         splits++;
         break;
       }

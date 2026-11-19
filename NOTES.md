@@ -4,6 +4,9 @@ Session memory. Architecture, commands and conventions live in `CLAUDE.md`; this
 only decisions, gotchas and open items. The 2D/3D merge (former PLAN.md / PROGRESS.md) is done.
 
 ## Key decisions
+- **3D is the product; 2D is temporary, a reference / testbed only** (user decision, 2026-11-19). Judge
+  every change by its 3D effect: if it helps 3D but worsens 2D, keep it. 2D still has to stay correct
+  (tests pass, PVS conservative), just not optimal.
 - 2D stays brush-only: no raw-wall/mesh import UI (user decision, 2026-11-15).
   `compileWalls` still accepts raw walls programmatically.
 - `makeWall` / CSG `EmptySpaceTest` are not unified across dimensions: 5-line functions over
@@ -101,8 +104,13 @@ only decisions, gotchas and open items. The 2D/3D merge (former PLAN.md / PROGRE
 - Phase 3.5: CSG uses a BVH broad phase (`shared/core/spatial/bvh.ts`, both dims; queries return ids ascending
   because 3D fragmentation is order-dependent). `compileSession()` reuses base vis rows (`incrementalBaseVis.ts`)
   and flow rows (`incrementalFlow.ts`) across edits, portals matched by exact geometry (`portalMatch.ts`);
-  bit-identical to fresh. Single-threaded, not wired into the editors yet. BSP is now the largest stage on
-  closed levels and its instability limits 3D reuse.
+  bit-identical to fresh. Single-threaded, not wired into the editors yet.
+- Stable BSP (phase 3.5): splitter candidates in canonical plane order (`planeRanks`; ties → lowest rank),
+  so the tree depends on geometry, not wall order; balance |front − back| bucketed at big nodes (`bsp/score.ts`,
+  helps 3D, costs 2D: kept); bounds snapped to a coarse grid (`snapBounds`); 3D CSG
+  walls keep the brush face's plane (not refitted to the fragment). `compileSession` builds the BSP with
+  `buildBspIncremental` (copies unchanged subtrees, equal to `buildBsp`; off with refinement). Session ids
+  (`BspCache.ids`) grow over a long session. Splitter hysteresis rejected: session ≠ fresh.
 
 - Phase 4 runtime clipping (`shared/core/runtime`): `visibleLeaves` with `clip: "planes"` (precise: clip the
   winding, next frustum = cone through the clipped winding via `Geometry.portalFrustum`) or `"rect"` (screen
@@ -134,10 +142,13 @@ only decisions, gotchas and open items. The 2D/3D merge (former PLAN.md / PROGRE
   `portalFlow.ts` is kept as the exact reference (`flat: false`). A change to flow semantics must land in
   both, and in both kernels' `flatKernel.ts` (bit-identical to `clipWinding` / `clipSegmentFront` /
   separators); `tests/shared/flatFlow.test.ts` catches drift.
+- `bsp/incremental.ts` keys must keep −0 apart from 0 (`exactKey`): `String(-0)` is "0", but flipped
+  planes carry −0 components and the copied tree would differ from `buildBsp`. (`portalKey` conflates them;
+  harmless there, matched portals compute identically.)
 - Git history of the source repos (`polyvis2d` cdac3e9, `polyvis3d` 2de2526) was not carried over.
 
 ## Open TODOs
-- Phase 3.5 paused (editor is low priority): wire `compileSession` into the compile worker; stable/incremental BSP.
+- Phase 3.5 paused (editor is low priority): wire `compileSession` into the compile worker.
 - 3D Oblique lattice truncates at the 20 M `maxSteps` budget (bench, single-threaded; ~92 s
   after phase 1, was ~118 s). Fixed with `baseVis: "passages"` (12.5 M steps, ~70 s), still truncates by default.
 - Debug layers portal graph / vis clusters / PVS heatmap read `shared/app/render/debugInfo.ts` (cached per
