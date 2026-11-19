@@ -12,7 +12,7 @@ import type { EditorModel } from "../editor/model";
 import { type Layers, LAYER_LABELS, type ViewState } from "../editor/viewState";
 import type { Tool, ToolId } from "../editor/tools/tool";
 import { h } from "../../../shared/app/ui/dom";
-import { checkbox, kv, levelSelect, numberInput, section } from "../../../shared/app/ui/widgets";
+import { checkbox, doorNameInput, kv, levelSelect, numberInput, section } from "../../../shared/app/ui/widgets";
 import { compilerOptionsSection, exportButtons, probeRows, statsRows } from "../../../shared/app/ui/compileSections";
 
 /** What the panel needs from the application. */
@@ -178,17 +178,19 @@ export class Panel {
     const { min, max } = b.bounds;
     const g = view.gridSize > 0 ? view.gridSize : 1;
     this.selectionBox.replaceChildren(
-      kv("Brush", `#${b.id} (${b.kind}${b.kind === "solid" && b.detail ? ", detail" : ""})`),
+      kv("Brush", `#${b.id} (${b.kind}${b.kind === "solid" && b.detail ? ", detail" : ""}${b.kind === "solid" && b.door ? `, door "${b.door}"` : ""})`),
       kv("Faces / volume", `${b.faces.length} / ${f(brushVolume(b))}`),
       kv("Min", `${f(min.x)}, ${f(min.y)}, ${f(min.z)}`),
       kv("Max", `${f(max.x)}, ${f(max.y)}, ${f(max.z)}`),
       h("div", { class: "button-row" },
         h("button", { onclick: () => model.setKind(b.id, b.kind === "room" ? "solid" : "room") }, "Toggle kind"),
         b.kind === "solid" ? h("button", { onclick: () => model.setDetail(b.id, !b.detail), title: "Detail brushes are drawn but do not cut the BSP or block visibility" }, b.detail ? "Make structural" : "Make detail") : null,
+        b.kind === "solid" ? h("button", { onclick: () => model.setDoor(b.id, b.door ? null : `door${b.id}`), title: "Door brushes are drawn but do not cut the BSP; the runtime query closes their portals while the door is shut" }, b.door ? "Not a door" : "Make door") : null,
         h("button", { onclick: () => model.duplicateBrush(b.id, { x: g, y: -g, z: 0 }) }, "Duplicate"),
         h("button", { onclick: () => { view.workZ = f(b.bounds.min.z); this.host.requestRender(); }, title: "Put the work plane at this brush's floor" }, "Work plane → floor"),
         h("button", { class: "danger", onclick: () => model.removeBrush(b.id) }, "Delete"),
       ),
+      ...(b.kind === "solid" && b.door ? [doorNameInput(b.door, (name) => model.setDoor(b.id, name))] : []),
     );
   }
 

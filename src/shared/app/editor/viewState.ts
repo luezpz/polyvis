@@ -23,6 +23,8 @@ export interface BaseLayers {
   runtime: boolean;
   /** Runtime clipping uses cheap screen rects instead of precise planes. */
   runtimeRect: boolean;
+  /** Runtime clipping treats every door (phase 4b) as closed. */
+  closeDoors: boolean;
 }
 
 /** Default panel labels of the shared layers; dimensions may override individual entries. */
@@ -41,6 +43,7 @@ export const BASE_LAYER_LABELS: Readonly<Record<keyof BaseLayers, string>> = {
   lineOfSight: "True line of sight",
   runtime: "Runtime portal clipping (probe)",
   runtimeRect: "Runtime clip: cheap rect mode",
+  closeDoors: "Runtime clip: close all doors",
 };
 
 /** What the inspect tool is probing; `V` is the dimension's vector type. */

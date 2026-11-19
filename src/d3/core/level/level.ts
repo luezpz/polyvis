@@ -16,7 +16,7 @@
  */
 
 import { type Plane3, type Vec3, type Winding, windingPlane, sanitizeWinding } from "../math";
-import { type Brush, type BrushKind, makeBrush, withDetail } from "./brush";
+import { type Brush, type BrushKind, makeBrush, withFlags } from "./brush";
 
 export const LEVEL_FORMAT = "polyvis-level-3d";
 export const LEVEL_VERSION = 1;
@@ -54,7 +54,7 @@ export function serializeLevel(level: Level): string {
   return JSON.stringify({
     format: level.format,
     version: level.version,
-    brushes: level.brushes.map((b) => ({ id: b.id, kind: b.kind, ...(b.detail ? { detail: true } : {}), planes: b.planes.map((p) => [p.n.x, p.n.y, p.n.z, p.d]) })), // full precision: rounding planes moves vertices
+    brushes: level.brushes.map((b) => ({ id: b.id, kind: b.kind, ...(b.detail ? { detail: true } : {}), ...(b.door ? { door: b.door } : {}), planes: b.planes.map((p) => [p.n.x, p.n.y, p.n.z, p.d]) })), // full precision: rounding planes moves vertices
     meshes: level.meshes.map((m) => ({ id: m.id, name: m.name, faces: m.faces.map((f) => f.map(p3)) })),
   }, null, 1);
 }
@@ -85,7 +85,7 @@ export function parseLevel(json: string): Level {
     if (id < 0 || seen.has(id)) id = Math.max(0, ...seen) + 1;
     seen.add(id);
     const brush = makeBrush(id, kind, planes);
-    if (brush) brushes.push(withDetail(brush, rb.detail === true));
+    if (brush) brushes.push(withFlags(brush, { detail: rb.detail === true, door: typeof rb.door === "string" ? rb.door : undefined }));
   }
 
   const meshes: ImportedMesh[] = [];

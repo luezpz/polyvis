@@ -131,6 +131,14 @@ export const DEMO_LEVELS: readonly SampleLevel[] = [
     create: () => build([{ kind: "room", points: ngon(0, 0, 12, 64) }, { kind: "solid", points: ngon(0, 0, 4, 32), detail: true }]),
   },
   {
+    group: EDGE, name: "Doors", description: "Three rooms in a row joined by doorways with door brushes (phase 4b); door \"loose\" leaves a gap and is reported as not sealing. Probe with \"Runtime clip: close all doors\".",
+    create: () => build([
+      room(0, 0, 10, 10), room(10, 4, 14, 6), room(14, 0, 24, 10), room(24, 3, 28, 7), room(28, 0, 38, 10),
+      { kind: "solid", box: [11.5, 4, 12.5, 6], door: "west" },
+      { kind: "solid", box: [25.5, 3, 26.5, 6], door: "loose" },
+    ]),
+  },
+  {
     group: EDGE, name: "Needle", description: "A 100-long, 0.2-wide corridor into a sliver triangle: extreme aspect ratios.",
     create: () => build([room(-8, -4, 0, 4), room(0, -0.1, 100, 0.1), { kind: "room", points: [{ x: 100, y: -0.3 }, { x: 130, y: 0 }, { x: 100, y: 0.3 }] }]),
   },

@@ -30,6 +30,12 @@ export interface Brush {
    * stays conservative: dropping an occluder can only make more leaves visible. Absent = structural.
    */
   readonly detail?: boolean;
+  /**
+   * Door name (solid only; phase 4b occluding doors): like detail, the brush is left out of the BSP
+   * (the PVS is baked with the door open), and the portals inside its volume are closed at runtime
+   * while the door named so is shut. Brushes sharing a name form one door. Absent = not a door.
+   */
+  readonly door?: string;
 }
 
 export const LEVEL_FORMAT = "polyvis-level-2d";
@@ -87,7 +93,7 @@ export function moveBrushEdge(brush: Brush, index: number, offset: number): Brus
     poly = clipPolygon(poly, i === index ? { n: line.n, d: line.d - offset } : line, NO_TAG);
   }
   const moved = poly ? makeBrush(brush.id, brush.kind, poly.vertices) : null;
-  return moved && withDetail(moved, brush.detail);
+  return moved && withFlags(moved, brush);
 }
 
 /** `brush` with its detail flag set to `detail` (the field is omitted when false, so structural brushes stay unchanged). */
@@ -96,8 +102,21 @@ export function withDetail<B extends { readonly detail?: boolean }>(brush: B, de
   return (detail ? { ...rest, detail: true } : rest) as B;
 }
 
-/** True if the brush takes part in the BSP: every room, and solids not flagged detail. */
-export const isStructural = (b: { readonly kind: string; readonly detail?: boolean }): boolean => b.kind === "room" || !b.detail;
+/** `brush` with its door name set to `door` (omitted when empty). */
+export function withDoor<B extends { readonly door?: string }>(brush: B, door: string | undefined): B {
+  const { door: _old, ...rest } = brush;
+  return (door ? { ...rest, door } : rest) as B;
+}
+
+/** `to` with the detail flag and door name of `from` (keeps flags across geometry edits). */
+export const withFlags = <B extends { readonly detail?: boolean; readonly door?: string }>(to: B, from: { readonly detail?: boolean; readonly door?: string }): B =>
+  withDoor(withDetail(to, from.detail), from.door);
+
+/** True if the brush takes part in the BSP: every room, and solids that are neither detail nor doors. */
+export const isStructural = (b: { readonly kind: string; readonly detail?: boolean; readonly door?: string }): boolean => b.kind === "room" || (!b.detail && !b.door);
+
+/** True for a solid brush with a door name (a door volume, see `Brush.door`). */
+export const isDoor = (b: { readonly kind: string; readonly door?: string }): boolean => b.kind === "solid" && !!b.door;
 
 export const nextBrushId =(level: Level): number => level.brushes.reduce((m, b) => Math.max(m, b.id), 0) + 1;
 
@@ -128,7 +147,7 @@ export function parseLevel(json: string): Level {
     if (id < 0 || seen.has(id)) id = Math.max(0, ...seen) + 1;
     seen.add(id);
     const brush = makeBrush(id, kind, pts);
-    if (brush) brushes.push(withDetail(brush, rb.detail === true));
+    if (brush) brushes.push(withFlags(brush, { detail: rb.detail === true, door: typeof rb.door === "string" ? rb.door : undefined }));
   }
   return { format: LEVEL_FORMAT, version: LEVEL_VERSION, brushes };
 }

@@ -85,7 +85,7 @@ only decisions, gotchas and open items. The 2D/3D merge (former PLAN.md / PROGRE
   convex (walls + portals): the flow's `onChain` "no re-entry" rule and precision both need it.
   Phase 3a is a no-op on leaf graphs (one portal per leaf pair). Details in the plan.
 - Phase 3c: `PvsTable` also carries column sharing (`leafColumn`, `columnRows`, decode with
-  `pvsTableSees`); lossless, always built. Export still v2 (wide rows); TODO v3 with `leafColumn`.
+  `pvsTableSees`); lossless, always built. Export (v3) still writes wide rows; TODO v4 with `leafColumn`.
 - Phase 3b `pvsCluster: "wide"` (option, lossy): leaves grouped *after* the flow
   (`vis/pvsClusters.ts` → `CompileResult.pvsClusters`); `pvs` stays per leaf. Not the same as 3e
   vis clusters (`cluster`), which change the flow. The `maxGrowth` guard must compare with exact leaf
@@ -103,7 +103,16 @@ only decisions, gotchas and open items. The 2D/3D merge (former PLAN.md / PROGRE
   winding, next frustum = cone through the clipped winding via `Geometry.portalFrustum`) or `"rect"` (screen
   rects; omnidirectional = cube map of 6 / 4 views). A leaf is re-entered only with a frustum / rect not
   contained in an earlier one (subsumption cut; without it 3D Pillar forest hung). Bench: `--runtime`
-  (flow capped for speed; `--exact-pvs` to disable). Open: write `packRuntime` data into the export files.
+  (flow capped for speed; `--exact-pvs` to disable). Export files are v3 (portal `plane` + `closed`).
+- Phase 4b doors (`shared/core/doors`): a solid brush with `door: "<name>"` is non-structural like detail
+  (baked open). The BSP builder is untouched: after it, `splitLeavesByDoors` splits empty leaves along the
+  door planes (a tree → tree pass; door volume normals point *into* the door), so each leaf is wholly in or
+  out; `findDoors` → `CompileResult.doors` (leaves, boundary portals, `seals` by flood). Runtime:
+  `doorPortalOpen` / `closedDoorPortals`. Door faces show up in `detailWalls`. Parity gap: OBJ meshes
+  can't be doors yet (`door_<name>` naming from the plan is open; brushes only, both dims).
+- No PAS (decided 2026-11-19): it is a bake-time artifact (can't be rebuilt on map load) and adds little.
+  Engines do sound on the portal graph instead (flood from the source leaf), using door portals
+  (`DoorInfo.portals`) to attenuate or stop sound.
 
 ## Gotchas
 - The flow's separator cache (1b) relies on `clipFacet` returning the **same object** when nothing
@@ -125,7 +134,8 @@ only decisions, gotchas and open items. The 2D/3D merge (former PLAN.md / PROGRE
   start, and measure the speed-up on a big 3D level (console.debug logs ready-source counts);
   tune `MAX_BATCH` / `MIN_PARALLEL_PORTALS` / `MIN_PARALLEL_WALLS` / `MAX_BSP_THREADS`.
 - Parallel base vis never run in a browser: confirm the speed-up there (Node numbers in Decisions).
+- Doors: OBJ `door_<name>` meshes (need a convex volume per mesh); door state in the export beyond the
+  `closed` flag (door → portal list).
 - Open decision: merge the two editor shells (panel/app) further, or keep sharing helpers only.
-- PAS (Potentially Audible Set) baking
 - Convex hulls generation (for physics engines, navmesh, etc.)
 - Lightmap baking

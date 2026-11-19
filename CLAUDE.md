@@ -38,6 +38,7 @@ src/shared/core/      dimension-agnostic compiler, generic over D extends Dim
                       clusters (convex leaf clusters, phase 3e)
   parallel/           workerQueue (next idle worker), costChunks, threadsFor
   spatial/bvh.ts      BVH over boxes (CSG broad phase)
+  doors/              occluding doors (phase 4b): door leaf splits, door → portals + sealing, runtime portalOpen
   vis/                BitSet, base vis, clusterRows (cluster rows → leaf portals), passages (canSee table), parallelRows (base vis + passages on workers), portal flow (+ exact parallel dependency scheduler), leaf PVS, shared PVS rows + columns (pvsTable), PVS clusters (pvsClusters, phase 3b), incremental base vis + flow (portalMatch, incrementalBaseVis, incrementalFlow, phase 3.5)
   runtime/            runtime portal clipping (phase 4): visibleLeaves (planes / rect modes), View camera,
                       object/light culling (leavesInBounds, lightLeaves), packRuntime typed-array export

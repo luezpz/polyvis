@@ -7,6 +7,10 @@
  * - **Text** (`.pvs.txt`): line-oriented, trivially parsed with `sscanf` /
  *   `StreamReader` without a JSON library. See {@link exportPvsText}.
  *
+ * Version 3 adds each portal's plane (normal into `to`) and a `closed` flag
+ * (latent portals, e.g. closed doors), so an engine can run the phase 4
+ * runtime portal clipping (`shared/core/runtime`) from the file alone.
+ *
  * Runtime usage in an engine:
  *   1. Walk the BSP from the root with the camera position to find its leaf
  *      (front if `dot(n, p) - d >= 0`, else back; negative refs are leaves).
@@ -16,7 +20,7 @@
  *      leaf cells).
  *
  * PVS rows are **shared**: identical rows are stored once and each leaf holds
- * an index into the row table (version 2; see `vis/pvsTable.ts`). Bit `j` of
+ * an index into the row table (since version 2; see `vis/pvsTable.ts`). Bit `j` of
  * a row set ⇔ leaf `j` is potentially visible. Hex, two characters per byte,
  * bit `j` in byte `j >> 3` at bit position `j & 7` (LSB first).
  */
@@ -26,7 +30,7 @@ import type { CompileResult } from "../pipeline";
 import { type Vec3, polyhedronAabb } from "../math";
 
 export const PVS_FORMAT = "polyvis-pvs-3d";
-export const PVS_VERSION = 2;
+export const PVS_VERSION = 3;
 
 type P3 = [number, number, number];
 const p3 = (v: Vec3): P3 => [round(v.x), round(v.y), round(v.z)];
@@ -54,14 +58,25 @@ export interface PvsDocument {
     /** Indices of walls with a piece bounding this leaf. */
     readonly walls: readonly number[];
   }[];
-  /** Directed portals; `points` is CCW seen from `to`. */
-  readonly portals: readonly { readonly from: number; readonly to: number; readonly points: readonly P3[] }[];
+  /**
+   * Directed portals; `points` is CCW seen from `to`. `plane` `[nx, ny, nz, d]` has its normal
+   * into `to`; `closed` marks latent portals (doors) the runtime traversal must skip.
+   */
+  readonly portals: readonly {
+    readonly from: number; readonly to: number; readonly points: readonly P3[];
+    readonly plane: [number, number, number, number]; readonly closed: boolean;
+  }[];
   /** Distinct PVS rows, each `ceil(leafCount / 8)` bytes. */
   readonly pvs: { readonly encoding: "hex-lsb"; readonly rows: readonly string[] };
 }
 
-export function buildPvsDocument(result: CompileResult): PvsDocument {
+/**
+ * Converts a compile result to the export document (coordinates rounded to 1e-6).
+ * `closed`: ids of portals exported as closed (latent doors, phase 4b); default none.
+ */
+export function buildPvsDocument(result: CompileResult, closed: Iterable<number> = []): PvsDocument {
   const { tree, graph, pvsTable, surfaces } = result;
+  const shut = new Set(closed);
   return {
     format: PVS_FORMAT,
     version: PVS_VERSION,
@@ -80,18 +95,23 @@ export function buildPvsDocument(result: CompileResult): PvsDocument {
         walls: [...new Set(surfaces[i].map((s) => s.wall))].sort((a, b) => a - b),
       };
     }),
-    portals: graph.portals.map((p) => ({ from: p.from, to: p.to, points: p.winding.map(p3) })),
+    portals: graph.portals.map((p, i) => ({
+      from: p.from, to: p.to, points: p.winding.map(p3),
+      plane: [round(p.plane.n.x), round(p.plane.n.y), round(p.plane.n.z), round(p.plane.d)], closed: shut.has(i),
+    })),
     pvs: { encoding: "hex-lsb", rows: pvsTable.rows.map((r) => r.toHex()) },
   };
 }
 
-export const exportPvsJson = (result: CompileResult): string => JSON.stringify(buildPvsDocument(result));
+/** JSON encoding of {@link buildPvsDocument}. */
+export const exportPvsJson = (result: CompileResult, closed: Iterable<number> = []): string =>
+  JSON.stringify(buildPvsDocument(result, closed));
 
 /**
  * Line-oriented text format:
  *
  * ```
- * polyvis-pvs-3d 2
+ * polyvis-pvs-3d 3
  * bounds <minx> <miny> <minz> <maxx> <maxy> <maxz>
  * planes <count>
  * <nx> <ny> <nz> <d>                                  (× count)
@@ -102,15 +122,15 @@ export const exportPvsJson = (result: CompileResult): string => JSON.stringify(b
  * leaves <count>
  * <empty|solid> <minx miny minz maxx maxy maxz | -> <pvsRow> <nwalls> <wall>...   (× count)
  * portals <count>
- * <from> <to> <npoints> <x y z>...                    (× count)
+ * <from> <to> <closed 0|1> <nx> <ny> <nz> <d> <npoints> <x y z>...   (× count)
  * pvs <rowCount> hex-lsb
  * <hex row>                                           (× rowCount; "-" for an all-zero row)
  * ```
  *
  * `<pvsRow>` indexes the rows after the `pvs` header (0-based).
  */
-export function exportPvsText(result: CompileResult): string {
-  const doc = buildPvsDocument(result);
+export function exportPvsText(result: CompileResult, closed: Iterable<number> = []): string {
+  const doc = buildPvsDocument(result, closed);
   const lines: string[] = [];
   lines.push(`${doc.format} ${doc.version}`);
   lines.push(`bounds ${doc.bounds.min.join(" ")} ${doc.bounds.max.join(" ")}`);
@@ -126,7 +146,7 @@ export function exportPvsText(result: CompileResult): string {
     lines.push([l.contents, box, l.pvs, l.walls.length, ...l.walls].join(" "));
   }
   lines.push(`portals ${doc.portals.length}`);
-  for (const p of doc.portals) lines.push([p.from, p.to, p.points.length, ...p.points.flat()].join(" "));
+  for (const p of doc.portals) lines.push([p.from, p.to, +p.closed, ...p.plane, p.points.length, ...p.points.flat()].join(" "));
   lines.push(`pvs ${doc.pvs.rows.length} ${doc.pvs.encoding}`);
   for (const r of doc.pvs.rows) lines.push(/^0*$/.test(r) ? "-" : r);
   return lines.join("\n") + "\n";

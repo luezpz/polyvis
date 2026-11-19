@@ -57,3 +57,15 @@ export function levelSelect(levels: readonly { name: string; description: string
   });
   return select;
 }
+
+/**
+ * A labelled text field for a door brush's name (phase 4b); `onChange(name)` fires on commit (change
+ * event) with the trimmed, non-empty name. Brushes sharing a name open and close together.
+ */
+export function doorNameInput(value: string, onChange: (name: string) => void): HTMLElement {
+  const input = h("input", { type: "text", value, onchange: (e: Event) => {
+    const name = (e.target as HTMLInputElement).value.trim();
+    if (name) onChange(name);
+  } });
+  return h("label", { class: "field", title: "Brushes with the same door name form one door" }, h("span", {}, "Door name"), input);
+}

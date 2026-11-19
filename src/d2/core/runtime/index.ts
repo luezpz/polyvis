@@ -10,7 +10,8 @@ import type { PortalGraph } from "../portals";
 export { portalFrustum2 } from "./portalFrustum";
 export { viewToward } from "./view";
 export type { ClipMode, RuntimeData, ScreenRect } from "../../../shared/core";
-export { anyVisible, fullRect, intersectRects, runtimePvsRow } from "../../../shared/core";
+export { anyVisible, fullRect, intersectRects, runtimePvsRow, doorPortalOpen, closedDoorPortals } from "../../../shared/core";
+export type { DoorInfo } from "../../../shared/core";
 export type View = shared.View<Dim2>;
 export type RuntimeOptions = VisibleLeavesOptions<Dim2>;
 

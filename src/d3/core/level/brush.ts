@@ -38,6 +38,12 @@ export interface Brush {
    * stays conservative: dropping an occluder can only make more leaves visible. Absent = structural.
    */
   readonly detail?: boolean;
+  /**
+   * Door name (solid only; phase 4b occluding doors): like detail, the brush is left out of the BSP
+   * (the PVS is baked with the door open), and the portals inside its volume are closed at runtime
+   * while the door named so is shut. Brushes sharing a name form one door. Absent = not a door.
+   */
+  readonly door?: string;
 }
 
 /** A 2D point, used for prism footprints. */
@@ -96,8 +102,21 @@ export function withDetail<B extends { readonly detail?: boolean }>(brush: B, de
   return (detail ? { ...rest, detail: true } : rest) as B;
 }
 
-/** True if the brush takes part in the BSP: every room, and solids not flagged detail. */
-export const isStructural = (b: { readonly kind: string; readonly detail?: boolean }): boolean => b.kind === "room" || !b.detail;
+/** `brush` with its door name set to `door` (omitted when empty). */
+export function withDoor<B extends { readonly door?: string }>(brush: B, door: string | undefined): B {
+  const { door: _old, ...rest } = brush;
+  return (door ? { ...rest, door } : rest) as B;
+}
+
+/** `to` with the detail flag and door name of `from` (keeps flags across geometry edits). */
+export const withFlags = <B extends { readonly detail?: boolean; readonly door?: string }>(to: B, from: { readonly detail?: boolean; readonly door?: string }): B =>
+  withDoor(withDetail(to, from.detail), from.door);
+
+/** True if the brush takes part in the BSP: every room, and solids that are neither detail nor doors. */
+export const isStructural = (b: { readonly kind: string; readonly detail?: boolean; readonly door?: string }): boolean => b.kind === "room" || (!b.detail && !b.door);
+
+/** True for a solid brush with a door name (a door volume, see `Brush.door`). */
+export const isDoor = (b: { readonly kind: string; readonly door?: string }): boolean => b.kind === "solid" && !!b.door;
 
 /** Axis-aligned box brush spanning two corners. */
 export function makeBoxBrush(id: number, kind: BrushKind, a: Vec3, b: Vec3): Brush | null {
@@ -137,13 +156,13 @@ export function makePrismBrush(id: number, kind: BrushKind, footprint: readonly 
 /** The brush moved by `delta` (null if `delta` is not finite). */
 export function translateBrush(brush: Brush, delta: Vec3): Brush | null {
   const moved = makeBrush(brush.id, brush.kind, brush.planes.map((p) => ({ n: p.n, d: p.d + dot(p.n, delta) })));
-  return moved && withDetail(moved, brush.detail);
+  return moved && withFlags(moved, brush);
 }
 
 /** The brush with face `index` pushed outwards by `offset` (pulled in if negative). Null if that degenerates it. */
 export function moveBrushFace(brush: Brush, index: number, offset: number): Brush | null {
   const moved = makeBrush(brush.id, brush.kind, brush.planes.map((p, i) => (i === index ? { n: p.n, d: p.d + offset } : p)));
-  return moved && withDetail(moved, brush.detail);
+  return moved && withFlags(moved, brush);
 }
 
 /** All vertices of the brush (face corners, shared corners repeated). */

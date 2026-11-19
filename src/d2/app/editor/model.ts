@@ -6,7 +6,7 @@
  * {@link EditorModel.endGesture} so a whole drag becomes one undo step.
  */
 
-import { type Brush, type BrushKind, type Level, type Vec2, emptyLevel, makeBrush, moveBrushEdge, nextBrushId, withDetail } from "../../core";
+import { type Brush, type BrushKind, type Level, type Vec2, emptyLevel, makeBrush, moveBrushEdge, nextBrushId, withFlags } from "../../core";
 import { History } from "../../../shared/app/editor/history";
 
 export type ModelChange = "level" | "selection";
@@ -93,12 +93,12 @@ export class EditorModel {
     return brush.id;
   }
 
-  /** Replaces a brush's geometry/kind/detail flag. Invalid (degenerate) geometry is ignored. */
-  updateBrush(id: number, changes: { kind?: BrushKind; vertices?: readonly Vec2[]; detail?: boolean }): void {
+  /** Replaces a brush's geometry/kind/detail flag/door name (`door: null` removes it). Invalid (degenerate) geometry is ignored. */
+  updateBrush(id: number, changes: { kind?: BrushKind; vertices?: readonly Vec2[]; detail?: boolean; door?: string | null }): void {
     const brushes = this._level.brushes.map((b) => {
       if (b.id !== id) return b;
       const next = makeBrush(id, changes.kind ?? b.kind, changes.vertices ?? b.vertices);
-      return next ? withDetail(next, changes.detail ?? b.detail) : b;
+      return next ? withFlags(next, { detail: changes.detail ?? b.detail, door: changes.door === null ? undefined : changes.door ?? b.door }) : b;
     });
     this.apply({ ...this._level, brushes });
   }
@@ -122,7 +122,7 @@ export class EditorModel {
     const b = this._level.brushes.find((x) => x.id === id);
     if (!b) return;
     const copy = this.addBrush(b.kind, b.vertices.map((v) => ({ x: v.x + offset.x, y: v.y + offset.y })));
-    if (copy !== null && b.detail) this.updateBrush(copy, { detail: true });
+    if (copy !== null && (b.detail || b.door)) this.updateBrush(copy, { detail: b.detail, door: b.door });
   }
 
   /** Moves a brush to the end (drawn on top / picked first). */

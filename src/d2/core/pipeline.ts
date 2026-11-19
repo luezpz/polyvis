@@ -8,7 +8,8 @@ import * as shared from "../../shared/core";
 import { DEFAULT_BSP_OPTIONS } from "./bsp";
 import { type Wall, buildDetailWalls, buildWalls } from "./csg";
 import { type Dim2, geometry2 } from "./geometry";
-import { type Level, isStructural } from "./level";
+import { type Brush, type Level, isDoor, isStructural } from "./level";
+import { lineFromPoints } from "./math";
 import { buildPortalGraph } from "./portals";
 
 export { type CompileOptions, type StageTiming, type VisSummary, DEFAULT_COMPILE_OPTIONS } from "../../shared/core";
@@ -20,8 +21,15 @@ const compiler = shared.createCompiler<Dim2, Level>({
   bspDefaults: DEFAULT_BSP_OPTIONS,
   levelWalls: (level) => buildWalls(level.brushes.filter(isStructural)), // detail brushes never cut the BSP
   detailWalls: (level) => buildDetailWalls(level.brushes),
+  doorVolumes: (level) => level.brushes.filter(isDoor).map(doorVolume),
   buildPortalGraph,
 });
+
+/** A door brush as a volume: its edge lines (normal on the left of a→b = into the CCW brush). */
+function doorVolume(b: Brush): shared.DoorVolume<Dim2> {
+  const vs = b.vertices;
+  return { name: b.door!, planes: vs.flatMap((a, i) => lineFromPoints(a, vs[(i + 1) % vs.length]) ?? []) };
+}
 
 /** Compiles a brush level. */
 export const compileLevel = (level: Level, options: Partial<shared.CompileOptions> = {}): CompileResult => compiler.compileLevel(level, options);

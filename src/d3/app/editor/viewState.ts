@@ -47,6 +47,7 @@ export class ViewState extends BaseViewState<Vec3, Layers, InspectState> {
     lineOfSight: true,
     runtime: false,
     runtimeRect: false,
+    closeDoors: false,
   };
 
   inspect: InspectState = { point: null, pinned: false, fromCamera: false, portal: null };

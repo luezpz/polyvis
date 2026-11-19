@@ -9,7 +9,7 @@ import type { EditorModel } from "../editor/model";
 import { type Layers, LAYER_LABELS, type ViewState } from "../editor/viewState";
 import type { Tool, ToolId } from "../editor/tools/tool";
 import { h } from "../../../shared/app/ui/dom";
-import { checkbox, kv, levelSelect, section } from "../../../shared/app/ui/widgets";
+import { checkbox, doorNameInput, kv, levelSelect, section } from "../../../shared/app/ui/widgets";
 import { compilerOptionsSection, exportButtons, probeRows, statsRows } from "../../../shared/app/ui/compileSections";
 
 /** What the panel needs from the application. */
@@ -130,15 +130,17 @@ export class Panel {
       return;
     }
     this.selectionBox.replaceChildren(
-      kv("Brush", `#${b.id} (${b.kind}${b.kind === "solid" && b.detail ? ", detail" : ""})`),
+      kv("Brush", `#${b.id} (${b.kind}${b.kind === "solid" && b.detail ? ", detail" : ""}${b.kind === "solid" && b.door ? `, door "${b.door}"` : ""})`),
       kv("Vertices", String(b.vertices.length)),
       h("div", { class: "button-row" },
         h("button", { onclick: () => model.updateBrush(b.id, { kind: b.kind === "room" ? "solid" : "room" }) }, "Toggle kind"),
         b.kind === "solid" ? h("button", { onclick: () => model.updateBrush(b.id, { detail: !b.detail }), title: "Detail brushes are drawn but do not cut the BSP or block visibility" }, b.detail ? "Make structural" : "Make detail") : null,
+        b.kind === "solid" ? h("button", { onclick: () => model.updateBrush(b.id, { door: b.door ? null : `door${b.id}` }), title: "Door brushes are drawn but do not cut the BSP; the runtime query closes their portals while the door is shut" }, b.door ? "Not a door" : "Make door") : null,
         h("button", { onclick: () => model.bringToFront(b.id) }, "To front"),
         h("button", { onclick: () => model.duplicateBrush(b.id, { x: 1, y: -1 }) }, "Duplicate"),
         h("button", { class: "danger", onclick: () => model.removeBrush(b.id) }, "Delete"),
       ),
+      ...(b.kind === "solid" && b.door ? [doorNameInput(b.door, (name) => model.updateBrush(b.id, { door: name }))] : []),
     );
   }
 

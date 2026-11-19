@@ -83,6 +83,8 @@ export function statsRows<D extends Dim>(r: CompileResult<D> | null, error: stri
     ...(r.pvsClusters ? [kv("PVS clusters (count / unique rows)", `${r.pvsClusters.count} / ${r.pvsClusters.table.rows.length}`)] : []),
     kv("Avg visible leaves", `${r.summary.averageVisibleLeaves.toFixed(1)} (${(r.summary.averageVisibleFraction * 100).toFixed(0)}%)`),
     kv("Flow steps", `${r.flowStats.steps}${r.flowStats.truncated ? " (TRUNCATED)" : ""}`),
+    ...(r.doors.length ? [kv("Doors (sealing / total)", `${r.doors.filter((d) => d.seals).length} / ${r.doors.length}`)] : []),
+    ...r.doors.filter((d) => !d.seals).map((d) => h("div", { class: "error" }, `Door "${d.name}" does not seal: it will never occlude`)),
     ...(r.leaks.leaking ? [h("div", { class: "error" }, `Leak: ${r.leaks.boundaryLeaves.length} empty leaves touch the bounds (${r.leaks.outsideLeaves.length} reachable)`)] : []),
     h("div", { class: "timings" },
       ...r.timings.map((t) => kv(t.stage, `${t.ms.toFixed(2)} ms`)),

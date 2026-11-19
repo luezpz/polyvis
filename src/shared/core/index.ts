@@ -10,6 +10,7 @@ export * from "./geometry";
 export * from "./wall";
 export * from "./bsp";
 export * from "./portals";
+export * from "./doors";
 export * from "./vis";
 export * from "./runtime";
 export * from "./pipeline";

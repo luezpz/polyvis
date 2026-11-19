@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   compileLevel, compileWalls, locateLeaf, leafComponents, makeWall, lineOfSight, SAMPLE_LEVELS,
-  exportPvsJson, exportPvsText, decodePvsRow, decodeLeafPvs, pvsRowOf, pvsTableSees, type Wall, type Level, type CompileOptions, type PvsDocument,
+  exportPvsJson, exportPvsText, decodePvsRow, decodeLeafPvs, packRuntime, pvsRowOf, pvsTableSees, type Wall, type Level, type CompileOptions, type PvsDocument,
 } from "../../src/d3/core";
 import { BitSet } from "../../src/shared/core";
 import { boxLevel, emptyLeaves, randomLevel, randomPointInLeaf, rng } from "./helpers";
@@ -214,13 +214,13 @@ describe("export", () => {
     const r = compileLevel(sample("Zigzag"));
     const doc = JSON.parse(exportPvsJson(r)) as PvsDocument;
     expect(doc.format).toBe("polyvis-pvs-3d");
-    expect(doc.version).toBe(2);
+    expect(doc.version).toBe(3);
     expect(doc.leaves).toHaveLength(r.tree.leaves.length);
     expect(doc.pvs.rows).toHaveLength(r.pvsTable.rows.length);
     r.pvs.forEach((row, leaf) => expect(decodeLeafPvs(doc, leaf)).toEqual(row.toArray()));
 
     const text = exportPvsText(r).trim().split("\n");
-    expect(text[0]).toBe("polyvis-pvs-3d 2");
+    expect(text[0]).toBe("polyvis-pvs-3d 3");
     const leavesHeader = text.findIndex((l) => l.startsWith("leaves "));
     const leafLines = text.slice(leavesHeader + 1, leavesHeader + 1 + r.tree.leaves.length);
     const pvsHeader = text.findIndex((l) => l.startsWith("pvs "));
@@ -232,6 +232,24 @@ describe("export", () => {
       const tok = line.split(" ");
       const rowIndex = Number(tok[1] === "-" ? tok[2] : tok[7]);
       expect(decodePvsRow(rows[rowIndex])).toEqual(r.pvs[leaf].toArray());
+    });
+  });
+
+  it("v3: exports each portal's plane and closed flag, matching packRuntime", () => {
+    const r = compileLevel(sample("Zigzag"));
+    const doc = JSON.parse(exportPvsJson(r, [0])) as PvsDocument;
+    const packed = packRuntime(r.graph, r.pvsTable, [0]);
+    doc.portals.forEach((p, i) => {
+      expect(p.closed).toBe(packed.portalClosed[i] === 1);
+      p.plane.forEach((x, k) => expect(x).toBeCloseTo(packed.portalPlanes[i * 4 + k], 5));
+    });
+    const text = exportPvsText(r, [0]).trim().split("\n");
+    const header = text.findIndex((l) => l.startsWith("portals "));
+    text.slice(header + 1, header + 1 + doc.portals.length).forEach((line, i) => {
+      // <from> <to> <closed> <plane...> ...
+      const tok = line.split(" ").map(Number);
+      expect(tok.slice(0, 3)).toEqual([doc.portals[i].from, doc.portals[i].to, i === 0 ? 1 : 0]);
+      expect(tok.slice(3, 3 + 4)).toEqual(doc.portals[i].plane);
     });
   });
 });

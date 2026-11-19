@@ -8,7 +8,7 @@
 
 import {
   type Brush, type BrushKind, type ImportedMesh, type Level, type Point2, type Vec3,
-  emptyLevel, makeBoxBrush, makeBrush, makePrismBrush, moveBrushFace, nextBrushId, nextMeshId, translateBrush, withDetail,
+  emptyLevel, makeBoxBrush, makeBrush, makePrismBrush, moveBrushFace, nextBrushId, nextMeshId, translateBrush, withDetail, withDoor, withFlags,
 } from "../../core";
 import { History } from "../../../shared/app/editor/history";
 
@@ -118,12 +118,17 @@ export class EditorModel {
   }
 
   setKind(id: number, kind: BrushKind): void {
-    this.replaceBrush(id, (b) => { const n = makeBrush(b.id, kind, b.planes); return n && withDetail(n, b.detail); });
+    this.replaceBrush(id, (b) => { const n = makeBrush(b.id, kind, b.planes); return n && withFlags(n, b); });
   }
 
   /** Flags a solid brush as detail (non-cutting) or structural. */
   setDetail(id: number, detail: boolean): void {
     this.replaceBrush(id, (b) => withDetail(b, detail));
+  }
+
+  /** Makes a solid brush a door named `name` (phase 4b), or not a door (`null` / empty). */
+  setDoor(id: number, name: string | null): void {
+    this.replaceBrush(id, (b) => withDoor(b, name || undefined));
   }
 
   /** Moves a brush to `original` translated by `delta` (gesture-friendly: always relative to the original). */
@@ -146,7 +151,7 @@ export class EditorModel {
     if (!b) return;
     const moved = translateBrush(b, offset);
     const copy = moved && makeBrush(nextBrushId(this._level), b.kind, moved.planes);
-    if (copy) this.addBrushObject(withDetail(copy, b.detail));
+    if (copy) this.addBrushObject(withFlags(copy, b));
   }
 
   addMesh(name: string, faces: ImportedMesh["faces"]): void {

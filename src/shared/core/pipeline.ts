@@ -8,6 +8,7 @@
  */
 
 import { type BspBuildOptions, type BspBuildResult, type BspStats, type BspTree, type LeafSurface, buildBsp, buildLeafSurfaces } from "./bsp";
+import { type DoorInfo, type DoorVolume, findDoors, splitLeavesByDoors } from "./doors";
 import type { Dim, Geometry } from "./geometry";
 import { type BoundaryPiece, type ClusterOptions, type LeakReport, type PortalGraph, buildLeafClusters, detectLeaks } from "./portals";
 import { type BitSet, type PassageTable, type PortalFlowOptions, type PortalFlowResult, type PortalFlowStats, type PvsSymmetry, type PvsClusterOptions, type PvsClusters, type PvsTable, type BaseVisCache, type FlowCache, buildPvsClusters, computeBaseVisIncremental, portalKeyIds, buildPvsTable, computeBaseVis, computePortalFlowIncremental, computePassages, passageMightSee, computeLeafPvs, computePortalFlow, expandClusterRows } from "./vis";
@@ -87,6 +88,11 @@ export interface CompileResult<D extends Dim> {
   readonly surfaces: readonly (readonly LeafSurface<D>[])[];
   readonly graph: PortalGraph<D>;
   readonly leaks: LeakReport;
+  /**
+   * Occluding doors (phase 4b), one per door name: their leaves, the portals they seal and whether
+   * they seal at all. The PVS is baked with every door open; `doorPortalOpen` gives the runtime state.
+   */
+  readonly doors: readonly DoorInfo[];
   /** Clusters the vis ran on, or null (`cluster: "none"`). Rows below are always per leaf portal. */
   readonly clusters: ClusterSummary | null;
   /** Base vis: per portal. */
@@ -113,6 +119,8 @@ export interface CompilerConfig<D extends Dim, L> {
   readonly levelWalls: (level: L) => Wall<D>[];
   /** Level → detail brush faces (full CSG); none if omitted. */
   readonly detailWalls?: (level: L) => Wall<D>[];
+  /** Level → door volumes (non-structural door brushes); none if omitted. */
+  readonly doorVolumes?: (level: L) => DoorVolume<D>[];
   /** Portal discovery between the empty leaves of a tree. */
   readonly buildPortalGraph: (tree: BspTree<D>) => PortalGraph<D>;
 }
@@ -167,20 +175,26 @@ export interface StageRunners<D extends Dim> {
 export function createCompiler<D extends Dim, L>(config: CompilerConfig<D, L>): Compiler<D, L> {
   const g = config.geometry;
 
-  /** Stages up to portals and leaks; `bsp` is the BSP stage's result (built by the caller, timed in `timings`). */
-  const throughPortals = (walls: readonly Wall<D>[], bsp: BspBuildResult<D>, opts: CompileOptions, timings: StageTiming[]) => {
-    const { tree, stats: bspStats } = bsp;
+  /**
+   * Stages up to portals, leaks and doors; `bsp` is the BSP stage's result (built by the caller,
+   * timed in `timings`). Door volumes first split the leaves they overlap (`splitLeavesByDoors`).
+   */
+  const throughPortals = (walls: readonly Wall<D>[], bsp: BspBuildResult<D>, opts: CompileOptions, timings: StageTiming[], doorVolumes: readonly DoorVolume<D>[] = []) => {
+    const split = doorVolumes.length ? timed(timings, "door splits", () => splitLeavesByDoors(g, bsp.tree, doorVolumes)) : null;
+    const tree = split ? split.tree : bsp.tree;
+    const bspStats = split?.splitCount ? treeStats(tree, bsp.stats, split.splitCount) : bsp.stats;
     const surfaces = timed(timings, "surfaces", () => buildLeafSurfaces(g, tree, walls));
     const graph = timed(timings, "portals", () => config.buildPortalGraph(tree));
     const leaks = timed(timings, "leaks", () => detectLeaks(g, tree, graph));
+    const doors = doorVolumes.length ? timed(timings, "doors", () => findDoors(g, tree, graph, doorVolumes)) : [];
     const vc = opts.cluster === "convex" ? timed(timings, "clusters", () => buildLeafClusters(g, tree, graph, clusterWalls(g, walls, surfaces), opts.clusterOptions)) : null;
     // `visGraph`: the graph base vis, passages and flow run on (clusters or leaves).
-    return { walls, tree, bspStats, surfaces, graph, leaks, vc, visGraph: vc ? vc.graph : graph };
+    return { walls, tree, bspStats, surfaces, graph, leaks, doors, vc, visGraph: vc ? vc.graph : graph };
   };
 
   /** Stages up to base vis, single-threaded. */
-  const throughBaseVis = (walls: readonly Wall<D>[], bsp: BspBuildResult<D>, opts: CompileOptions, timings: StageTiming[]) => {
-    const pre = throughPortals(walls, bsp, opts, timings);
+  const throughBaseVis = (walls: readonly Wall<D>[], bsp: BspBuildResult<D>, opts: CompileOptions, timings: StageTiming[], doors: readonly DoorVolume<D>[]) => {
+    const pre = throughPortals(walls, bsp, opts, timings, doors);
     const base: readonly BitSet[] = timed(timings, "base vis", () => computeBaseVis(g, pre.visGraph));
     return { ...pre, base };
   };
@@ -192,8 +206,8 @@ export function createCompiler<D extends Dim, L>(config: CompilerConfig<D, L>): 
   };
 
   /** Stages up to the flow input, single-threaded. */
-  const beforeFlow = (walls: readonly Wall<D>[], bsp: BspBuildResult<D>, opts: CompileOptions, timings: StageTiming[]) => {
-    const pre = throughBaseVis(walls, bsp, opts, timings);
+  const beforeFlow = (walls: readonly Wall<D>[], bsp: BspBuildResult<D>, opts: CompileOptions, timings: StageTiming[], doors: readonly DoorVolume<D>[]) => {
+    const pre = throughBaseVis(walls, bsp, opts, timings, doors);
     const passages = opts.baseVis === "passages" ? timed(timings, "passage vis", () => computePassages(g, pre.visGraph, pre.base)) : null;
     return withPassages(pre, passages, timings);
   };
@@ -215,10 +229,14 @@ export function createCompiler<D extends Dim, L>(config: CompilerConfig<D, L>): 
     return { ...rest, mightSee, clusters, detailWalls: [], portalVis, flowStats, pvs, pvsTable, pvsClusters, summary: summarize(tree, graph, mightSee, portalVis, pvs), timings };
   };
 
-  const compileWalls = (walls: readonly Wall<D>[], options: Partial<CompileOptions> = {}, timings: StageTiming[] = []): CompileResult<D> => {
+  const compileWalls = (walls: readonly Wall<D>[], options: Partial<CompileOptions> = {}, timings: StageTiming[] = []): CompileResult<D> =>
+    compileWithDoors(walls, [], options, timings);
+
+  /** `compileWalls` plus door volumes (see `throughPortals`). */
+  const compileWithDoors = (walls: readonly Wall<D>[], doors: readonly DoorVolume<D>[], options: Partial<CompileOptions>, timings: StageTiming[]): CompileResult<D> => {
     const opts: CompileOptions = { ...DEFAULT_COMPILE_OPTIONS, ...options };
     const bsp = timed(timings, "bsp", () => buildBsp(g, walls, bspOptions(opts)));
-    const pre = beforeFlow(walls, bsp, opts, timings);
+    const pre = beforeFlow(walls, bsp, opts, timings, doors);
     const flow = timed(timings, "portal flow", () => computePortalFlow(g, pre.visGraph, pre.mightSee, flowOptions(opts, pre)));
     return afterFlow(pre, flow, opts, timings);
   };
@@ -227,8 +245,11 @@ export function createCompiler<D extends Dim, L>(config: CompilerConfig<D, L>): 
     const timings: StageTiming[] = [];
     const walls = timed(timings, "csg", () => config.levelWalls(level));
     const detailWalls = levelDetailWalls(level, timings);
-    return { ...compileWalls(walls, options, timings), detailWalls };
+    return { ...compileWithDoors(walls, levelDoors(level), options, timings), detailWalls };
   };
+
+  /** Door volumes of a level (none when the dimension has no doors). */
+  const levelDoors = (level: L): DoorVolume<D>[] => (config.doorVolumes ? config.doorVolumes(level) : []);
 
   /** Detail faces of a level, timed as "detail csg" when the dimension provides them. */
   const levelDetailWalls = (level: L, timings: StageTiming[]): Wall<D>[] =>
@@ -244,7 +265,7 @@ export function createCompiler<D extends Dim, L>(config: CompilerConfig<D, L>): 
     const tb = performance.now();
     const bsp = runners.bsp ? await runners.bsp(walls, bspOptions(opts)) : buildBsp(g, walls, bspOptions(opts));
     timings.push({ stage: "bsp", ms: performance.now() - tb });
-    const portals = throughPortals(walls, bsp, opts, timings);
+    const portals = throughPortals(walls, bsp, opts, timings, levelDoors(level));
     const tv = performance.now();
     const base = { ...portals, base: runners.baseVis ? await runners.baseVis(portals.visGraph) : computeBaseVis(g, portals.visGraph) };
     timings.push({ stage: "base vis", ms: performance.now() - tv });
@@ -271,7 +292,7 @@ export function createCompiler<D extends Dim, L>(config: CompilerConfig<D, L>): 
         const walls = timed(timings, "csg", () => config.levelWalls(level));
         const detailWalls = levelDetailWalls(level, timings);
         const bsp = timed(timings, "bsp", () => buildBsp(g, walls, bspOptions(opts)));
-        const portals = throughPortals(walls, bsp, opts, timings);
+        const portals = throughPortals(walls, bsp, opts, timings, levelDoors(level));
         const ids = timed(timings, "portal keys", () => portalKeyIds(g, portals.visGraph));
         const bv = timed(timings, "base vis", () => computeBaseVisIncremental(g, portals.visGraph, baseCache, ids));
         baseCache = bv.cache;
@@ -291,6 +312,15 @@ export function createCompiler<D extends Dim, L>(config: CompilerConfig<D, L>): 
 /** The flow options of a compile; with a passage table, also the table and the base-vis source order. */
 function flowOptions(opts: CompileOptions, pre: { readonly passages: PassageTable | null; readonly base: readonly BitSet[] }): Partial<PortalFlowOptions> {
   return pre.passages ? { ...opts.flow, passages: pre.passages, orderBy: pre.base } : opts.flow;
+}
+
+/** BSP stats of a tree changed after the build (door splits): counts recomputed, `extraSplits` added to the refine splits. */
+function treeStats<D extends Dim>(tree: BspTree<D>, base: BspStats, extraSplits: number): BspStats {
+  const empty = tree.leaves.filter((l) => l.contents === "empty").length;
+  return {
+    ...base, nodeCount: tree.nodes.length, leafCount: tree.leaves.length, emptyLeafCount: empty, solidLeafCount: tree.leaves.length - empty,
+    maxDepth: tree.leaves.reduce((m, l) => Math.max(m, l.depth), 0), refineSplitCount: base.refineSplitCount + extraSplits,
+  };
 }
 
 /** Averages of the PVS and portal-vis set sizes, for the stats panel. */

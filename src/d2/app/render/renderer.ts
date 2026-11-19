@@ -6,7 +6,7 @@
 
 import {
   type CompileResult, type Level, type Vec2,
-  type BitSet, centroid, locateLeaf, midpoint, splitterSegments, visibilityPolygon, addScaled, visibleLeaves,
+  type BitSet, centroid, locateLeaf, midpoint, splitterSegments, visibilityPolygon, addScaled, visibleLeaves, doorPortalOpen,
 } from "../../core";
 import type { Camera } from "../editor/camera";
 import type { ViewState } from "../editor/viewState";
@@ -28,7 +28,7 @@ export class Renderer {
   private readonly painter: Painter;
   /** Splitter segments are cached per compile result. */
   private splitterCache: { result: CompileResult; segments: ReturnType<typeof splitterSegments> } | null = null;
-  private runtimeCache: { result: CompileResult; x: number; y: number; clip: string; value: BitSet } | null = null;
+  private runtimeCache: { result: CompileResult; x: number; y: number; clip: string; shut: boolean; value: BitSet } | null = null;
 
   constructor(private readonly canvas: HTMLCanvasElement, private readonly camera: Camera) {
     const ctx = canvas.getContext("2d");
@@ -148,9 +148,11 @@ export class Renderer {
     if (!view.layers.runtime) return null;
     const clip = view.layers.runtimeRect ? "rect" : "planes";
     const c = this.runtimeCache;
-    if (c && c.result === result && c.x === p.x && c.y === p.y && c.clip === clip) return c.value;
-    const value = visibleLeaves(result.graph, leaf, p, { clip, pvsRow: result.pvs[leaf] });
-    this.runtimeCache = { result, x: p.x, y: p.y, clip, value };
+    const shut = view.layers.closeDoors;
+    if (c && c.result === result && c.x === p.x && c.y === p.y && c.clip === clip && c.shut === shut) return c.value;
+    const portalOpen = shut ? doorPortalOpen(result.graph.portals.length, result.doors, result.doors.map((d) => d.name)) : undefined;
+    const value = visibleLeaves(result.graph, leaf, p, { clip, pvsRow: result.pvs[leaf], portalOpen });
+    this.runtimeCache = { result, x: p.x, y: p.y, clip, shut, value };
     return value;
   }
 

@@ -268,7 +268,7 @@ Left open, bench-driven: 1a flow half, 1c, 1f, 1g. The 3D flow is now dominated 
 
   `minWidth: 2` (refinement merges only) with the guard: tighter (3D Maze 905 → 200 at exact Σ),
   fewer merges elsewhere. `--pvs-cluster '{json}'` tunes it. Open: export layout for clusters
-  (with 3c's v3), flow on clusters (that is 3e).
+  (with 3c's export bump), flow on clusters (that is 3e).
 3c. **Keep PVS indirection, extend it** (lossless, same units; stacks on clusters).
   - `PvsTable` stays: dedup rows of whatever the unit is (leaves or clusters); clustering
     saturates rows, so duplicates get more common, not less.
@@ -282,7 +282,7 @@ Left open, bench-driven: 1a flow half, 1c, 1f, 1g. The 3D flow is now dominated 
   leaf PVS is (near) symmetric, so identical columns ⇔ identical rows. The payoff is width:
   rows × leaves → rows × groups bits, e.g. 2D Maze 16×16 1282 × 2104 → 1282 × 1282, 3D Maze
   10×10 151 × 905 → 151 × 151, 3D Comb 32 × 187 → 32 × 32. Bench prints `leaves | pvs rows |
-  pvs columns`. Not yet in the export (v2 still writes wide rows): a v3 layout with
+  pvs columns`. Not yet in the export (it still writes wide rows): a next-version layout with
   `leafColumn` per leaf is the open step.
 3d. **Hint walls** (`hint_` material/brush): split planes that are never solid.
 3e. **Lossless leaf merging**: after the BSP, merge two empty leaves sharing a portal when
@@ -446,7 +446,9 @@ Pure TS module `src/shared/core/runtime/` (no DOM; usable in editor preview and 
 - Culling: `leavesInBounds(tree, box)` (BSP walk, register an object once per move), `anyVisible`,
   `lightLeaves` (omnidirectional query from the light ∩ its radius box; closed doors block light).
 - Export: `packRuntime(graph, pvsTable, closed)` → typed arrays (CSR leaf → portals, planes, winding
-  vertices, `portalClosed`, shared PVS rows). Not yet written into the JSON/text export files.
+  vertices, `portalClosed`, shared PVS rows). The JSON/text export files are v3: each portal also carries
+  its `plane` (normal into `to`) and a `closed` flag (`exportPvs*(result, closed)`), so an engine can run the
+  traversal from the file alone. Column sharing (3c) would need another format bump.
 - Editor: layers "Runtime portal clipping (probe)" and "Runtime clip: cheap rect mode". PVS leaves the
   query culls are orange. 3D "probe from camera" uses the real camera frustum; other probes are
   omnidirectional. Checked in headless Chrome (no console errors).
@@ -484,13 +486,31 @@ Doors must block vis when closed, without rebaking.
   4. Bake the PVS with all doors open (conservative for every door state).
 - **Runtime**: `portalOpen[p] = !doorClosed[portalDoor[p]]`; the traversal skips closed
   portals, so a closed door hides everything behind it. Partly open = open (conservative).
-- **Extras**: closed doors also cut PAS/sound flood; export door → portal list.
+- **Extras**: export door → portal list. Sound: engines flood the portal graph from the source and
+  attenuate or stop at door portals (no PAS, see phase 5).
 - **Tests**: closed door ⇒ nothing behind it visible from in front (both dims); open door ⇒
   same as no door; non-sealing door reported.
 
+**Status (2026-11-19): done for brushes** (`src/shared/core/doors/`, both dims).
+- Authoring: `Brush.door` (name; solid only; brushes sharing a name are one door), saved in the level
+  JSON, editor buttons "Make door" / "Not a door" plus a name field. Non-structural like detail.
+- Compile: instead of teaching the (parallel) BSP builder about doors, a post-pass `splitLeavesByDoors`
+  splits each empty leaf overlapping a door volume along its planes (only empty leaves are subdivided, so
+  the PVS stays conservative). `findDoors`: door leaves = centroid inside the volume; door portals = those
+  crossing the leaf set's boundary; `seals` = the leaves around the door fall into ≥ 2 components without
+  it. Non-sealing doors are listed as errors in the compile panel. New stages: "door splits", "doors".
+- Runtime: `doorPortalOpen(portalCount, result.doors, closedNames)` → `portalOpen` for `visibleLeaves` /
+  `lightLeaves`; `closedDoorPortals` → `packRuntime` / export `closed` flags. Editor layer
+  "Runtime clip: close all doors". Demo level "Doors" (2D + 3D). Checked in headless Chrome.
+- Tests (`tests/d*/doors.test.ts`): leaves wholly in/out of the door, sealing / non-sealing, closed door
+  hides the far room while open shows it, PVS conservative w.r.t. ray-tested sight lines, serialization,
+  export `closed` flags.
+- Open: OBJ `door_<name>` meshes; door → portal list in the export files.
+
 ## Phase 5: extras
 
-- PAS: `computePas(pvs) → PvsTable` (one-bounce OR); export option; test PVS ⊆ PAS.
+- ~~PAS~~ dropped (2026-11-19): a baked artifact that can't be rebuilt at map load, and not needed.
+  Sound runs on the portal graph at runtime instead, with door portals attenuating or stopping it.
 - Per-cluster draw lists from original triangles (OBJ path) for the runtime renderer.
 - PVS export compression: zero-run RLE per row (Quake), on top of row/column sharing.
 - WASM/SIMD for the antipenumbra clip: only if the bench shows the TS hot loop is the
@@ -511,6 +531,6 @@ Doors must block vis when closed, without rebaking.
 | 1d allocation-free bitsets, 1e early-out (done) | S | flow −10–17% |
 | 3e convex leaf clusters (done, option) | S–M | flow up to 2× faster, Σ pvs +10–100%: draft bakes |
 | 3.5 CSG BVH (done), incremental base vis + flow (done in core, `compileSession`) | M | CSG up to 28× faster; closed levels recompile 2× faster after an edit; editor wiring + stable BSP open |
-| 4 runtime clipping (done: planes + rect modes, culling, typed-array export, editor layer) | L | runtime culling: e.g. PVS 46 → 7 leaves |
-| 4b occluding doors | M | closed doors hide rooms, no rebake |
+| 4 runtime clipping (done: planes + rect modes, culling, typed-array + v3 file export, editor layer) | L | runtime culling: e.g. PVS 46 → 7 leaves |
+| 4b occluding doors (done for brushes; OBJ doors open) | M | closed doors hide rooms, no rebake |
 | 1c, 1f, 1g, 3a (no-op on leaves), 3d, 5 | S–M | situational, bench-driven |

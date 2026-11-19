@@ -8,7 +8,7 @@ import * as shared from "../../shared/core";
 import { DEFAULT_BSP_OPTIONS } from "./bsp";
 import { type Wall, buildDetailWalls, buildWalls, buildMeshWalls } from "./csg";
 import { type Dim3, geometry3 } from "./geometry";
-import { type Level, isStructural } from "./level";
+import { type Level, isDoor, isStructural } from "./level";
 import { buildPortalGraph } from "./portals";
 
 export { type CompileOptions, type StageTiming, type VisSummary, DEFAULT_COMPILE_OPTIONS } from "../../shared/core";
@@ -20,6 +20,8 @@ const compiler = shared.createCompiler<Dim3, Level>({
   bspDefaults: DEFAULT_BSP_OPTIONS,
   levelWalls: (level) => [...buildWalls(level.brushes.filter(isStructural)), ...buildMeshWalls(level.meshes)],
   detailWalls: (level) => buildDetailWalls(level.brushes),
+  // Door volumes: brush planes are outward, a volume's point into the door.
+  doorVolumes: (level) => level.brushes.filter(isDoor).map((b) => ({ name: b.door!, planes: b.planes.map(geometry3.flipPlane) })),
   buildPortalGraph,
 });
 
