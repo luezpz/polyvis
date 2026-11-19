@@ -546,7 +546,7 @@ Doors must block vis when closed, without rebaking.
 | 1g separator order / early reject (measured 2026-11-19: no payoff, closed) | S | step 3 "last rejecter first": identical results, timings within noise; step 4 never rejects (see below), so ordering cannot help |
 | 6a flat base vis (done 2026-11-19, exact) | S | base vis ms: 2D Maze 186 → 16, 2D Pillar forest 151 → 21, 2D Grid city 48 → 25, 3D Pillar forest 44 → 7, 3D Maze 21 → 4; 2D Maze total 298 → 140 |
 | 1f / 6b flat flow (done 2026-11-19, exact) | M | flow ms: 2D Pillar forest 405 → 150, 2D Oblique lattice 190 → 71, 3D Pillar forest 419 → 319, 3D Maze 9 → 11 (noise); totals 2D Pillar forest 579 → 206, 3D 498 → 359 |
-| 6c bench through a bundle (no module-runner getters) | S | bench numbers match production; today imports in hot loops cost up to ~15% of a stage |
+| 6c bench through a bundle (done 2026-11-19) | S | `npm run bench` bundles (Vite/Rolldown SSR build, `scripts/benchBundle.mjs`) then runs it; `--runner` = old path. Counters identical; totals: 3D Maze 101 → 63, 3D Grid city 70 → 42, 2D Oblique lattice 130 → 100 ms (mostly BSP); flow within noise (hot loops already bind imports locally) |
 | 4 runtime coherence (reuse last frame's result inside the same leaf, cache static-light results) | S | cuts worst-case frames (planes cam 8–260 µs per query) |
 | 3d hint walls (`hint_` material in the OBJ) | S–M | tighter PVS and faster flow on open levels, placed in Blender |
 | 1a flow half (sphere test before `clipFacet`) | S | doubtful: step 1 almost never rejects |
@@ -622,8 +622,10 @@ SoA + no dispatch. Plan, in order:
   through the `shared/core` barrel, a getter chain per read under Vite's runner; module-level copies fixed it.
   Remaining 3D flow time is arithmetic (`separatorPass`, `clipRaw`). Planned as: flat facets through `flowFromSource` (steps 1–4 on pooled per-depth buffers, no per-step
   allocation), per-dimension flat clip + separator kernels; then flow/passages share them.
-- **6c bench**: run `scripts/bench.ts` from a bundle (esbuild/Rollup) so imported functions/constants are
-  plain bindings; until then, bind imports locally in hot loops.
+- **6c bench (done 2026-11-19)**: `scripts/benchBundle.mjs` builds `bench.ts` + `benchWorker.ts` into
+  `node_modules/.bench` (unminified SSR bundle, imports are plain bindings) on every run; `--runner` keeps the
+  module-runner path. Gains are in the cold-ish stages (BSP 3D Grid city 35 → 13 ms); flow / base vis were
+  already within noise. Vitest still uses the runner: keep binding imports locally in hot loops.
 - Later, only if profiles say so: BSP region clipping (`clipPolyhedron`, 3D BSP ~46%: faces as flat
   windings), BSP fragment min/max cached per fragment for scoring. Not worth it: CSG (< 10%), nodes /
   leaves / BitSet (cold or already typed), editor-side data.

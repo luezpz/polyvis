@@ -81,7 +81,7 @@ only decisions, gotchas and open items. The 2D/3D merge (former PLAN.md / PROGRE
   memory cap (dense: slots × portals bits). Any vis change must keep the `--all` non-timing columns identical
   unless it is meant to change results. Bench: `npm run bench [-- --all | --only <s> | --obj <file> | --passages | --cluster | --pvs-cluster [json] | --bsp <json> | --threads <n> | --repeat <k>]`
   (`--threads` = Node worker threads for the passage table; `--repeat` reports the last, warm run);
-  it runs TS through `vite.runnerImport` (no `@types/node`: keep Node APIs in `scripts/bench.mjs`).
+  it bundles `bench.ts` (`scripts/benchBundle.mjs`, out `node_modules/.bench`) and runs the bundle; `--runner` runs TS through `vite.runnerImport` (no `@types/node`: keep Node APIs in `scripts/bench.mjs`).
 - Phase 3e `cluster: "convex"` (option, default off, lossy): vis runs on convex leaf clusters,
   rows mapped back to leaf portals (`expandClusterRows`), so results stay per leaf. Clusters must be
   convex (walls + portals): the flow's `onChain` "no re-entry" rule and precision both need it.
@@ -126,8 +126,8 @@ only decisions, gotchas and open items. The 2D/3D merge (former PLAN.md / PROGRE
   unchanged by the switch.
 
 ## Gotchas
-- Bench profiles (`node --cpu-prof scripts/bench.mjs ...`) show Vite's module runner `get` (import
-  bindings resolved through getters) as a large self-time entry: a bench artifact, absent in bundles.
+- Profiles under `--runner` / vitest show Vite's module runner `get` (import bindings resolved through
+  getters) as a large self-time entry; the default bundled bench has none.
 - The flow's separator cache (1b) relies on `clipFacet` returning the **same object** when nothing
   is cut (both kernels do); `Geometry.separators` must list planes in `clipToSeparators` order.
 - Flow runs on flat arrays (phase 6b, `vis/flatFlow.ts`, `Geometry.flatFlow`); the object walk in
