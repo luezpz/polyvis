@@ -12,6 +12,9 @@ export const PLANE_EPSILON = 1e-5;
 /** Edges shorter than this are treated as degenerate (their vertices are merged). */
 export const MIN_LENGTH = 1e-4;
 
+/** {@link MIN_LENGTH} squared: compare squared lengths against it and skip the sqrt. */
+export const MIN_LENGTH_SQ = MIN_LENGTH * MIN_LENGTH;
+
 /** Polygons (3D windings, 2D cells) with an area below this are treated as degenerate and dropped. */
 export const MIN_AREA = 1e-6;
 

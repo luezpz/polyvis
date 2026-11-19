@@ -39,7 +39,7 @@ export function viewFrustum<D extends Dim>(g: Geometry<D>, eye: Vec<D>, view: Vi
   const f = g.coords(view.forward);
   const out: Plane<D>[] = [];
   const plane = (c: number[]): void => {
-    const len = Math.hypot(...c);
+    const len = Math.sqrt(c.reduce((s, x) => s + x * x, 0));
     const n = g.vecAt(c.map((x) => x / len), 0);
     out.push({ n, d: g.dot(n, eye) });
   };

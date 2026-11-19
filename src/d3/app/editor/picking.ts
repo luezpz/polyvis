@@ -51,7 +51,7 @@ export function faceHandleAt(camera: Camera, brush: Brush, screen: ScreenPoint, 
   brush.faces.forEach((f, i) => {
     const s = camera.project(windingCenter(f.winding));
     if (!s) return;
-    const d = Math.hypot(s.x - screen.x, s.y - screen.y);
+    const d = Math.sqrt((s.x - screen.x) ** 2 + (s.y - screen.y) ** 2);
     // Prefer the nearer handle when several overlap on screen.
     const score = d + s.depth * 1e-3;
     if (d <= radiusPx && score < bestScore) {

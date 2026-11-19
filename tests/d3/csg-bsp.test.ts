@@ -16,7 +16,7 @@ function expectClosed(walls: readonly Wall[]) {
     x += n.x; y += n.y; z += n.z;
   }
   const scale = Math.max(1, totalArea(walls));
-  expect(Math.hypot(x, y, z) / scale).toBeLessThan(1e-9);
+  expect(Math.sqrt(x * x + y * y + z * z) / scale).toBeLessThan(1e-9);
 }
 
 describe("brushes", () => {

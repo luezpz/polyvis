@@ -47,4 +47,4 @@ export const aabbSize = (b: Aabb): Vec3 => ({ x: b.max.x - b.min.x, y: b.max.y -
 export const aabbVolume = (b: Aabb): number => (b.max.x - b.min.x) * (b.max.y - b.min.y) * (b.max.z - b.min.z);
 
 /** Length of the box diagonal. */
-export const aabbDiagonal = (b: Aabb): number => Math.hypot(b.max.x - b.min.x, b.max.y - b.min.y, b.max.z - b.min.z);
+export const aabbDiagonal = (b: Aabb): number => Math.sqrt((b.max.x - b.min.x) ** 2 + (b.max.y - b.min.y) ** 2 + (b.max.z - b.min.z) ** 2);

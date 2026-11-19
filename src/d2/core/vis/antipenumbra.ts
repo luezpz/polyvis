@@ -27,7 +27,7 @@
  * edges of `to` × vertices of `from` (Golodetz, Listing 2); see `d3/core/vis/antipenumbra.ts`.
  */
 
-import { type Line2, type Segment, type Vec2, clipSegmentFront, MIN_LENGTH, PLANE_EPSILON } from "../math";
+import { type Line2, type Segment, type Vec2, clipSegmentFront, MIN_LENGTH_SQ, PLANE_EPSILON } from "../math";
 
 /**
  * Builds the separating lines between `from` and `to`, oriented so that `to`
@@ -38,14 +38,13 @@ export function buildSeparators(from: Segment, to: Segment, eps = PLANE_EPSILON)
   const fv: readonly Vec2[] = [from.a, from.b];
   const tv: readonly Vec2[] = [to.a, to.b];
   const out: Line2[] = [];
-  const nearSq = 4 * MIN_LENGTH * MIN_LENGTH;
   for (let i = 0; i < 2; i++) {
     for (let j = 0; j < 2; j++) {
       const p = fv[i], q = tv[j];
       const ex = q.x - p.x, ey = q.y - p.y;
-      // Portals share this vertex: no separator through it. Squared pre-check skips most hypot calls (decision unchanged).
-      if (ex * ex + ey * ey < nearSq && Math.hypot(p.x - q.x, p.y - q.y) < MIN_LENGTH) continue;
-      const len = Math.hypot(-ey, ex);
+      const lenSq = ex * ex + ey * ey;
+      if (lenSq < MIN_LENGTH_SQ) continue; // portals share this vertex: no separator through it
+      const len = Math.sqrt(lenSq);
       if (!(len > 0)) continue;
       const nx = -ey / len, ny = ex / len;
       if (nx === 0 && ny === 0) continue;

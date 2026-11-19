@@ -3,7 +3,7 @@
  * point to create a convex brush (the convex hull of the clicked points).
  */
 
-import { type Vec2, convexHull, distance } from "../../../core";
+import { type Vec2, convexHull, distanceSq } from "../../../core";
 import type { Painter } from "../../render/painter";
 import type { Tool, ToolContext, ToolPointer } from "./tool";
 import { kindColors } from "../../render/colors";
@@ -29,12 +29,12 @@ export class PolygonTool implements Tool {
   pointerDown(p: ToolPointer): void {
     if (p.button !== 0) return;
     const first = this.points[0];
-    if (first && this.points.length >= 3 && distance(first, p.world) <= this.ctx.camera.pixels(CLOSE_PX)) {
+    if (first && this.points.length >= 3 && distanceSq(first, p.world) <= this.ctx.camera.pixels(CLOSE_PX) ** 2) {
       this.finish();
       return;
     }
     const last = this.points[this.points.length - 1];
-    if (!last || distance(last, p.snapped) > 1e-9) this.points.push(p.snapped);
+    if (!last || distanceSq(last, p.snapped) > 1e-18) this.points.push(p.snapped);
     this.ctx.requestRender();
   }
 

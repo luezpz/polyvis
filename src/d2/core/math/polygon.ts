@@ -11,9 +11,9 @@
  * `vertices[(i + 1) % n]` and has the interior on its left.
  */
 
-import { type Vec2, cross, distance, lerp, sub } from "./vec2";
+import { type Vec2, cross, distanceSq, lerp, sub } from "./vec2";
 import { type Line2, flipLine, signedDistance } from "./line2";
-import { MIN_AREA, MIN_LENGTH, PLANE_EPSILON } from "../../../shared/core/math";
+import { MIN_AREA, MIN_LENGTH_SQ, PLANE_EPSILON } from "../../../shared/core/math";
 import type { Aabb } from "./aabb";
 
 /** Tag used for edges that do not originate from any known line. */
@@ -80,7 +80,7 @@ export function convexContains(vertices: readonly Vec2[], p: Vec2, strict = fals
   for (let i = 0, n = vertices.length; i < n; i++) {
     const a = vertices[i], b = vertices[(i + 1) % n];
     const e = sub(b, a);
-    const len = Math.hypot(e.x, e.y);
+    const len = Math.sqrt(e.x * e.x + e.y * e.y);
     if (len === 0) continue;
     const d = cross(e, sub(p, a)) / len; // distance to the left of the edge
     if (strict ? d <= eps : d < -eps) return false;
@@ -134,7 +134,7 @@ function sanitizePolygon(v: Vec2[], t: number[]): ConvexPolygon | null {
   const outT: number[] = [];
   for (let i = 0; i < v.length; i++) {
     // Drop v[i] if it coincides with the next vertex; that vertex keeps its own outgoing tag.
-    if (distance(v[i], v[(i + 1) % v.length]) < MIN_LENGTH) continue;
+    if (distanceSq(v[i], v[(i + 1) % v.length]) < MIN_LENGTH_SQ) continue;
     outV.push(v[i]);
     outT.push(t[i]);
   }

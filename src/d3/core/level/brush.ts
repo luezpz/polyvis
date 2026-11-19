@@ -59,7 +59,7 @@ export interface Point2 {
 export function makeBrush(id: number, kind: BrushKind, planes: readonly Plane3[]): Brush | null {
   const unique: Plane3[] = [];
   for (const raw of planes) {
-    const len = Math.hypot(raw.n.x, raw.n.y, raw.n.z);
+    const len = Math.sqrt(raw.n.x * raw.n.x + raw.n.y * raw.n.y + raw.n.z * raw.n.z);
     if (!(len > 0) || !Number.isFinite(raw.d)) continue;
     const p: Plane3 = { n: normalize(raw.n), d: raw.d / len };
     if (!unique.some((q) => sameOrientedPlane(p, q))) unique.push(p);

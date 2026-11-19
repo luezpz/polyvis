@@ -5,9 +5,9 @@
  * the *front* (empty space for walls, destination leaf for portals) on the left.
  */
 
-import { type Vec2, distance, lerp, sub, cross } from "./vec2";
+import { type Vec2, distance, distanceSq, lerp, sub, cross } from "./vec2";
 import { type Line2, signedDistance } from "./line2";
-import { MIN_LENGTH, PLANE_EPSILON, Side } from "../../../shared/core/math";
+import { MIN_LENGTH_SQ, PLANE_EPSILON, Side } from "../../../shared/core/math";
 
 export interface Segment {
   readonly a: Vec2;
@@ -43,7 +43,7 @@ export function clipSegmentFront(s: Segment, line: Line2, eps = PLANE_EPSILON): 
   if (da >= -eps && db >= -eps) return s; // fully in front (touching allowed)
   const p = lerp(s.a, s.b, da / (da - db));
   const out = da > 0 ? { a: s.a, b: p } : { a: p, b: s.b };
-  return segmentLength(out) < MIN_LENGTH ? null : out;
+  return distanceSq(out.a, out.b) < MIN_LENGTH_SQ ? null : out;
 }
 
 /** Splits a segment that spans `line` into its front and back parts. */

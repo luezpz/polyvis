@@ -4,7 +4,7 @@
  * clicked points, extruded by the "new brush height").
  */
 
-import { type Vec3, convexHull2, distance } from "../../../core";
+import { type Vec3, convexHull2, distanceSq } from "../../../core";
 import type { Overlay } from "../../render/overlay";
 import type { Tool, ToolContext, ToolPointer } from "./tool";
 import { kindCss } from "../../render/colors";
@@ -32,13 +32,13 @@ export class PolygonTool implements Tool {
     const first = this.points[0];
     if (first && this.points.length >= 3) {
       const s = this.ctx.camera.project(first);
-      if (s && Math.hypot(s.x - p.screen.x, s.y - p.screen.y) <= CLOSE_PX) {
+      if (s && (s.x - p.screen.x) ** 2 + (s.y - p.screen.y) ** 2 <= CLOSE_PX * CLOSE_PX) {
         this.finish();
         return;
       }
     }
     const last = this.points[this.points.length - 1];
-    if (!last || distance(last, p.workSnapped) > 1e-9) this.points.push(p.workSnapped);
+    if (!last || distanceSq(last, p.workSnapped) > 1e-18) this.points.push(p.workSnapped);
     this.ctx.requestRender();
   }
 

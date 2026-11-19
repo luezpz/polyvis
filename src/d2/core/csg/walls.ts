@@ -28,9 +28,9 @@
 
 import {
   type Vec2, type Segment,
-  addScaled, distance, lerp, midpoint, normalize, perpLeft, sub, dot,
+  addScaled, distance, distanceSq, lerp, midpoint, normalize, perpLeft, sub, dot,
   segmentIntersection, projectParam, distanceToSegmentLine, convexContains, lineFromPoints,
-  KEY_QUANTUM, MIN_LENGTH, PLANE_EPSILON, PROBE_OFFSET,
+  KEY_QUANTUM, MIN_LENGTH, MIN_LENGTH_SQ, PLANE_EPSILON, PROBE_OFFSET,
 } from "../math";
 import { type Bvh, type Wall as SharedWall, bvhAnyAt, bvhQueryBox, buildBvh } from "../../../shared/core";
 import type { Dim2 } from "../geometry";
@@ -72,7 +72,7 @@ export function makeEmptySpaceTest(brushes: readonly Brush[]): EmptySpaceTest {
 /** Creates a wall from a segment (empty space on the left). Returns null for degenerate segments. */
 export function makeWall(seg: Segment, sourceId = -1): Wall | null {
   const plane = lineFromPoints(seg.a, seg.b);
-  if (!plane || distance(seg.a, seg.b) < MIN_LENGTH) return null;
+  if (!plane || distanceSq(seg.a, seg.b) < MIN_LENGTH_SQ) return null;
   return { winding: seg, plane, sourceId };
 }
 
@@ -145,7 +145,7 @@ function fragmentEdge(edge: Segment, owner: Brush, brushes: readonly Brush[]): S
 
 /** Decides whether a piece separates empty from non-empty space, and orients it. */
 function classifyPiece(piece: Segment, brushId: number, isEmpty: EmptySpaceTest): Wall | null {
-  if (distance(piece.a, piece.b) < MIN_LENGTH) return null;
+  if (distanceSq(piece.a, piece.b) < MIN_LENGTH_SQ) return null;
   const m = midpoint(piece.a, piece.b);
   const left = normalize(perpLeft(sub(piece.b, piece.a)));
   const emptyLeft = isEmpty(addScaled(m, left, PROBE_OFFSET));

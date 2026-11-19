@@ -7,10 +7,10 @@
  * counterpart of the oriented 2D `Segment` (a→b with the front on the left).
  */
 
-import { type Vec3, addScaled, cross, distance, dot, lerp, normalize, sub, average } from "./vec3";
+import { type Vec3, addScaled, cross, distanceSq, dot, lerp, normalize, sub, average } from "./vec3";
 import { type Plane3, flipPlane, planeBasis, projectOntoPlane, signedDistance } from "./plane3";
 import { type Aabb, aabbFromPoints } from "./aabb";
-import { MIN_AREA, MIN_LENGTH, PLANE_EPSILON, Side } from "../../../shared/core/math";
+import { MIN_AREA, MIN_LENGTH_SQ, PLANE_EPSILON, Side } from "../../../shared/core/math";
 
 export type Winding = readonly Vec3[];
 
@@ -35,7 +35,7 @@ export const windingNormal = (w: Winding): Vec3 => normalize(newellNormal(w));
 /** Area of a planar winding. */
 export function windingArea(w: Winding): number {
   const n = newellNormal(w);
-  return 0.5 * Math.hypot(n.x, n.y, n.z);
+  return 0.5 * Math.sqrt(n.x * n.x + n.y * n.y + n.z * n.z);
 }
 
 /** Vertex average; for a convex winding this is an interior point. */
@@ -124,7 +124,7 @@ export function splitWinding(w: Winding, plane: Plane3, eps = PLANE_EPSILON): { 
 export function sanitizeWinding(v: readonly Vec3[]): Winding | null {
   const out: Vec3[] = [];
   for (let i = 0; i < v.length; i++) {
-    if (distance(v[i], v[(i + 1) % v.length]) < MIN_LENGTH) continue;
+    if (distanceSq(v[i], v[(i + 1) % v.length]) < MIN_LENGTH_SQ) continue;
     out.push(v[i]);
   }
   if (out.length < 3 || windingArea(out) < MIN_AREA) return null;

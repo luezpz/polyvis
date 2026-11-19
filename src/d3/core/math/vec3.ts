@@ -34,8 +34,13 @@ export const cross = (a: Vec3, b: Vec3): Vec3 => ({
 });
 
 export const lengthSq = (a: Vec3): number => a.x * a.x + a.y * a.y + a.z * a.z;
-export const length = (a: Vec3): number => Math.hypot(a.x, a.y, a.z);
-export const distance = (a: Vec3, b: Vec3): number => Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z);
+export const length = (a: Vec3): number => Math.sqrt(a.x * a.x + a.y * a.y + a.z * a.z);
+export const distance = (a: Vec3, b: Vec3): number => Math.sqrt(distanceSq(a, b));
+/** Squared distance: use it for threshold comparisons (no sqrt). */
+export const distanceSq = (a: Vec3, b: Vec3): number => {
+  const dx = a.x - b.x, dy = a.y - b.y, dz = a.z - b.z;
+  return dx * dx + dy * dy + dz * dz;
+};
 
 /** Returns the unit vector in the direction of `a`, or ZERO for a zero-length input. */
 export function normalize(a: Vec3): Vec3 {

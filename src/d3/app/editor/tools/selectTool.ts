@@ -151,7 +151,7 @@ export class SelectTool implements Tool {
 
 /** Horizontal part of a direction, normalized (falls back to +x). */
 function normalizeXY(v: Vec3): Vec3 {
-  const len = Math.hypot(v.x, v.y);
+  const len = Math.sqrt(v.x * v.x + v.y * v.y);
   return len > 1e-6 ? { x: v.x / len, y: v.y / len, z: 0 } : { x: 1, y: 0, z: 0 };
 }
 

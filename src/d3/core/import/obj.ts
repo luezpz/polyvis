@@ -95,7 +95,7 @@ function triangulate(ids: readonly number[], pos: readonly Vec3[]): number[][] {
   if (ids.length < 3) return [];
   const pts = ids.map((i) => pos[i]);
   const nRaw = newellNormal(pts);
-  if (Math.hypot(nRaw.x, nRaw.y, nRaw.z) < 1e-12) return [];
+  if (nRaw.x * nRaw.x + nRaw.y * nRaw.y + nRaw.z * nRaw.z < 1e-24) return [];
   if (ids.length === 3) return [[...ids]];
   const { u, v } = planeBasis({ n: normalize(nRaw), d: 0 });
   const p2 = pts.map((p) => ({ x: dot(p, u), y: dot(p, v) }));
@@ -183,7 +183,7 @@ function isConvex(loop: readonly number[], pos: readonly Vec3[], normal: Vec3): 
     const a = pos[loop[i]], b = pos[loop[(i + 1) % n]], c = pos[loop[(i + 2) % n]];
     const e1 = sub(b, a), e2 = sub(c, b);
     const turn = dot(cross(e1, e2), normal);
-    if (turn < -1e-9 * Math.max(1, Math.hypot(e1.x, e1.y, e1.z) * Math.hypot(e2.x, e2.y, e2.z))) return false;
+    if (turn < -1e-9 * Math.max(1, Math.sqrt((e1.x * e1.x + e1.y * e1.y + e1.z * e1.z) * (e2.x * e2.x + e2.y * e2.y + e2.z * e2.z)))) return false;
   }
   return true;
 }
