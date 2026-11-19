@@ -57,7 +57,7 @@ lets one big cell wrap around a convex solid corner (pillar, door jamb, inner co
 so its PVS row is everything visible from *either* side. Instead of closing an empty region as a
 leaf straight away, the builder keeps splitting it:
 
-- `cornerSplits` — any wall whose endpoint touches the region and whose line passes through its
+- `cornerSplits` (default off, see NOTES.md) — any wall whose endpoint touches the region and whose line passes through its
   interior (i.e. the wall's extension past the corner) is a candidate; the most balanced one
   wins. These lines are where the view around a corner changes, so cells bounded by them get
   much tighter PVS rows.

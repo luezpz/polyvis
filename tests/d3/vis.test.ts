@@ -87,7 +87,7 @@ describe("PVS", () => {
   });
 
   it("corner splits cull cells hidden behind a door jamb", () => {
-    const r = compileLevel(sample("Two rooms"));
+    const r = compileLevel(sample("Two rooms"), { bsp: { cornerSplits: true } });
     const doorway = leafAt(r, 9, 4, 1);
     for (const b of emptyLeaves(r)) expect(r.pvs[doorway].has(b)).toBe(true);
     const leaves = emptyLeaves(r);

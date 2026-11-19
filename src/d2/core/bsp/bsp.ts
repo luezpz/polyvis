@@ -23,7 +23,7 @@ export const DEFAULT_BSP_OPTIONS: shared.BspBuildOptions = Object.freeze({
   splitWeight: 8,
   balanceWeight: 1,
   boundsMargin: 4,
-  cornerSplits: true,
+  cornerSplits: false,
   minCellSize: 0.5,
   maxCellSize: 0,
 });

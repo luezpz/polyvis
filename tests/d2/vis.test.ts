@@ -66,7 +66,7 @@ describe("PVS", () => {
   });
 
   it("corner splits cull cells hidden behind a door jamb", () => {
-    const r = compileLevel(SAMPLE_LEVELS.find((s) => s.name === "Two rooms")!.create());
+    const r = compileLevel(SAMPLE_LEVELS.find((s) => s.name === "Two rooms")!.create(), { bsp: { cornerSplits: true } });
     const doorway = leafAt(r, 9, 4);
     for (const b of emptyLeaves(r)) expect(r.pvs[doorway].has(b)).toBe(true);
     // With the jamb extensions some cells of one room are hidden from cells of the other.

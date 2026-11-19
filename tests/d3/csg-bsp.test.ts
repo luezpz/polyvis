@@ -164,7 +164,7 @@ const touches = (region: ConvexPolyhedron, w: Winding): boolean => wallTouchesRe
 
 /** Bounding boxes `[min, max]` of the empty leaves of a compiled sample level, rounded to 1e-6. */
 function emptyLeafBoxes(name: string): [number[], number[]][] {
-  const { tree } = compileLevel(SAMPLE_LEVELS.find((s) => s.name === name)!.create());
+  const { tree } = compileLevel(SAMPLE_LEVELS.find((s) => s.name === name)!.create(), { bsp: { cornerSplits: true } });
   const r = (v: number) => Math.round(v * 1e6) / 1e6;
   return tree.leaves.filter((l) => l.contents === "empty" && l.region).map((l) => {
     const b = polyhedronAabb(l.region!)!;

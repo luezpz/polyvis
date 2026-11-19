@@ -9,6 +9,110 @@ both dimensions, LOS conservativeness tests must pass unchanged, one test per ne
 measure before/after with the phase 0 bench. Each phase is an option (default off) until the
 bench shows a win, then flip the default.
 
+## Re-baseline: corner splits off by default (2026-11-18)
+
+`BspBuildOptions.cornerSplits` now defaults to `false` in both dimensions. The splits were meant
+to tighten leaf PVS rows around convex corners, but they multiply leaves and portals and the
+flow cost grows much faster than that. The old phase 0–3 tables (measured with corner splits on) were removed; numbers quoted in the
+phase text below are from that setup and are stale. This section holds the same benchmarks
+re-run with the new default. Σ pvs / Σ portalVis cannot be compared with the old tables,
+because the tree and its units differ.
+
+Defaults vs the old defaults (`npm run bench -- --all`, single-threaded, one run; old = "after
+phase 1" timings):
+
+| level | portals | base vis ms | flow ms | steps |
+|---|---|---|---|---|
+| 2d/Grid city 8×8 | 1504 → 630 | ~230 → 71 | ~290 → 87 | 84859 → 14044 |
+| 2d/Maze 16×16 | 3316 → 1428 | ~1130 → 288 | ~215 → 54 | 52424 → 9818 |
+| 2d/Pillar forest | 2684 → 1234 | ~760 → 217 | ~7400 → 1304 | 2085171 → 313490 |
+| 2d/Oblique lattice | 1588 → 824 | ~250 → 98 | ~2400 → 606 | 888221 → 160178 |
+| 3d/Grid city 6×6 | 1886 → 252 | ~650 → 13 | ~650 → 29 | 147259 → 2754 |
+| 3d/Maze 10×10 | 396 → 396 | — | — | identical (no corner splits fire) |
+| 3d/Pillar forest | 1120 → 528 | ~190 → 53 | ~2450 → 827 | 500438 → 124251 |
+| 3d/Overlap pile | 540 → 300 | 57 → 99 (noise) | 814 → 298 | 187356 → 39541 |
+| 3d/Oblique lattice | 1742 → 568 | 476 → 95 | 91530 (trunc) → **3132** | 20 M (trunc) → **579519** |
+
+The 3D worst case no longer comes near `maxSteps`: it finishes in about 3 s instead of being
+truncated after about 90 s. Flow is 3–20× faster on the heavy levels, and base vis is 2.5–50×
+faster.
+
+**Phase 2 passages, re-run.** `--all --passages` (single run), plus `--repeat 3` warm runs with
+`--threads 1 / 4 / 11`. Σ pvs is identical to planes on every level, including 3D Oblique
+lattice, which no longer truncates under either mode.
+
+| level | Σ mightSee | steps | table ms 1t / 4t / 11t | flow ms planes → passages (warm) |
+|---|---|---|---|---|
+| 2d/Grid city 8×8 | 81781 → 57183 | 14044 → 12801 | 34 / 33 / 23 | 63 → 58 |
+| 2d/Maze 16×16 | 18938 → 14639 | 9818 → 9352 | 14 / 13 / 14 | 42 → 44 |
+| 2d/Pillar forest | 363049 → 333311 | 313490 → 242045 | 123 / 51 / 50 | 1154 → 979 |
+| 2d/Oblique lattice | 161437 → 141276 | 160178 → 111749 | 66 / 43 / 34 | 502 → 392 |
+| 3d/Grid city 6×6 | 14422 → 8163 | 2754 → 2190 | 15 / 14 / 16 | 14 → 12 |
+| 3d/Pillar forest | 67168 → 61246 | 124251 → 109369 | 108 / 60 / 61 | 720 → 649 |
+| 3d/Vent grille | 2256 → 1658 | 1642 → 1304 | 3 / 3 / 3 | 7 → 4 |
+| 3d/Oblique lattice (cold) | 90889 → 87023 | 579519 → 274485 | 271 (1t) | 3132 → 1800 |
+
+Verdict: the picture matches the old one, at a smaller scale. Single-threaded, base vis + table
++ flow is about even: 2D Pillar forest 1329 → 1267 ms, 2D Oblique lattice 589 → 537 ms, 3D
+Pillar forest 765 → 800 ms, 3D Oblique lattice 3227 → 2173 ms, and slightly worse on the Grid
+cities. With threads the table cost mostly disappears. Threads also parallelise base vis (2D
+Maze 236 → 73 ms on 4 threads), so the editors' pool helps either mode. Passages stay opt-in.
+
+**Phase 3b PVS clusters, re-run** (`--pvs-cluster`, defaults):
+
+| level | leaves → clusters | Σ pvs → Σ cluster pvs |
+|---|---|---|
+| 2d/Grid city 8×8 | 494 → 218 | 11699 → 12015 (+3%) |
+| 2d/Maze 16×16 | 1484 → 385 | 10629 → 11667 (+10%) |
+| 2d/Pillar forest | 459 → 203 | 69682 → 75708 (+9%) |
+| 2d/Serpentine | 80 → 38 | 173 → 175 |
+| 2d/Oblique lattice | 260 → 148 | 20754 → 22034 (+6%) |
+| 3d/Grid city 6×6 | 450 → 97 | 2514 → 2546 (+1%) |
+| 3d/Maze 10×10 | 905 → 95 | 2683 → 2953 (+10%) |
+| 3d/Tower | 142 → 19 | 685 → 745 (+9%) |
+| 3d/Pillar forest | 301 → **2** | 17517 → 18496 (+6%) |
+| 3d/Vent grille | 168 → 39 | 1012 → 1044 (+3%) |
+
+The precision guard still caps the loss at about 10%. Without corner splits, 3D Pillar forest's
+empty space is nearly mutually visible, so the guard lets it collapse into 2 clusters.
+
+**Phase 3c column sharing:** column groups = distinct rows everywhere except 3D Pillar forest
+(117 rows / 122 groups) and 3D Oblique lattice (47 / 48).
+
+**Phase 3e convex leaf clusters, re-run** (`--all --cluster`, single run; leaf flow → cluster
+flow):
+
+| level | portals → flow portals | flow ms | steps | Σ pvs |
+|---|---|---|---|---|
+| 2d/Grid city 8×8 | 630 → 544 | 87 → 63 | 14044 → 12307 | 11699 → 25281 (+116%) |
+| 2d/Maze 16×16 | 1428 → 1044 | 54 → 29 | 9818 → 5405 | 10629 → 11783 (+11%) |
+| 2d/Pillar forest | 1234 → 1046 | 1304 → 771 | 313490 → 255397 | 69682 → 78921 (+13%) |
+| 2d/Oblique lattice | 824 → 824 | — | no merges | identical |
+| 3d/Grid city 6×6 | 252 → 240 | 29 → 20 | 2754 → 2440 | 2514 → 2546 (+1%) |
+| 3d/Pillar forest | 528 → 448 | 827 → 687 | 124251 → 146674 | 17517 → 18253 (+4%) |
+| 3d/Overlap pile | 300 → 284 | 298 → 149 | 39541 → 34917 | 2568 → 2640 (+3%) |
+| 3d/Oblique lattice | 568 → 568 | — | no merges | identical |
+
+Verdict unchanged: a draft-bake speed knob. There is less left to merge now, because most of the
+old merges undid refinement splits.
+
+**Phase 3f splitter heuristic, re-run** (`--bsp '{"facingWeight":4}'` vs defaults, single run):
+
+| level | leaves | portals | flow ms | Σ pvs |
+|---|---|---|---|---|
+| 2d/Grid city 8×8 | 494 → 433 | 630 → 544 | ~65 → 58 | 11699 → 10376 |
+| 2d/Maze 16×16 | 1484 → 1080 | 1428 → 1028 | ~45 → 24 | 10629 → 6049 |
+| 2d/Pillar forest | 459 → 357 | 1234 → 850 | ~1150 → 491 | 69682 → 30522 |
+| 3d/Grid city 6×6 | 450 → 299 | 252 → 240 | ~15 → 22 | 2514 → 2176 |
+| 3d/Maze 10×10 | 905 → 584 | 396 → 396 | ~14 → 16 | 2683 → 2683 |
+| 3d/Pillar forest | 301 → 157 | 528 → 252 | ~720 → 75 | 17517 → 3470 |
+| 3d/Vent grille | 168 → 103 | 172 → 144 | ~7 → 0 | 1012 → 184 |
+
+Verdict changed: corner splits used to hide most of the gain. Without them, `facingWeight: 4`
+cuts portals and flow time on almost every level (3D Pillar forest flow is about 10× faster),
+and only 3D Grid city is slightly slower. This makes it a candidate for the next default flip,
+The LOS tests already cover it in both dimensions; check it on a big OBJ level (`--obj`) first.
+
 ## Phase 0: measure (prerequisite)
 
 - `scripts/bench.ts` (run with `npx vite-node` or vitest bench): compile demo mazes + one large
@@ -21,37 +125,6 @@ bench shows a win, then flip the default.
 `--obj <file>` (no large OBJ is in the repo; pass one). Counters added: `facetClips`
 (steps 1–2) and `separatorClips` (steps 3–4) in `PortalFlowStats`. `classifyCalls` was dropped:
 the flow never classifies, and base vis does at most 2 per ordered pair (≈ 2n², n = portals).
-
-Baseline (single-threaded Node 26, one run, `--all`; edge cases with no portals omitted):
-
-| level | portals | base vis ms | Σ mightSee | flow ms | steps | facet clips | separator clips | Σ portalVis | Σ pvs |
-|---|---|---|---|---|---|---|---|---|---|
-| 2d/Grid city 8×8 | 1504 | 545 | 408058 | 403 | 84859 | 169718 | 154684 | 76596 | 43720 |
-| 2d/Maze 16×16 | 3316 | 2671 | 80250 | 262 | 52424 | 104848 | 87856 | 46036 | 33839 |
-| 2d/Pillar forest | 2684 | 1610 | 1717614 | 9974 | 2085171 | 4170342 | 3640971 | 691076 | 359021 |
-| 2d/Serpentine | 152 | 7 | 514 | 1 | 406 | 812 | 440 | 334 | 563 |
-| 2d/Comb | 160 | 6 | 5560 | 20 | 5560 | 11120 | 10564 | 5560 | 5801 |
-| 2d/Slit wall | 120 | 4 | 2662 | 12 | 2578 | 5156 | 4680 | 2138 | 1911 |
-| 2d/Oblique lattice | 1588 | 667 | 583538 | 3830 | 888221 | 1775612 | 1406154 | 205746 | 74959 |
-| 2d/Overlap pile | 88 | 2 | 1819 | 9 | 2399 | 4796 | 3864 | 1768 | 624 |
-| 2d/Islands | 16 | 0 | 40 | 0 | 40 | 80 | 48 | 40 | 63 |
-| 2d/Round room | 128 | 4 | 1466 | 4 | 1303 | 2606 | 2041 | 1272 | 593 |
-| 2d/Needle | 6 | 0 | 6 | 0 | 6 | 12 | 4 | 6 | 16 |
-| 2d/Far from origin | 12 | 0 | 26 | 0 | 26 | 52 | 24 | 26 | 45 |
-| 3d/Grid city 6×6 | 1886 | 1211 | 444235 | 858 | 147259 | 294518 | 270737 | 125972 | 49998 |
-| 3d/Maze 10×10 | 396 | 44 | 4566 | 12 | 2288 | 4576 | 3544 | 2088 | 2683 |
-| 3d/Tower | 536 | 89 | 11421 | 70 | 13324 | 26641 | 22506 | 10440 | 4647 |
-| 3d/Pillar forest | 1120 | 407 | 296424 | 2919 | 500438 | 1000876 | 862433 | 168552 | 76099 |
-| 3d/Serpentine | 104 | 3 | 346 | 1 | 274 | 548 | 296 | 226 | 383 |
-| 3d/Comb | 120 | 4 | 3120 | 14 | 3120 | 6240 | 5824 | 3120 | 3301 |
-| 3d/Vent grille | 496 | 72 | 51768 | 193 | 50410 | 100820 | 83166 | 27776 | 12480 |
-| 3d/Oblique lattice | 1742 | 1134 | 856051 | 117809 | 20000001 (trunc) | 39982702 | 28695056 | 761912 | 69876 |
-| 3d/Edge & corner kiss | 2 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 6 |
-| 3d/Overlap pile | 540 | 88 | 70416 | 1084 | 187356 | 374352 | 299017 | 67980 | 7984 |
-| 3d/Islands | 96 | 3 | 1848 | 6 | 1856 | 3712 | 3176 | 1848 | 673 |
-| 3d/Round room | 96 | 3 | 839 | 2 | 768 | 1536 | 1124 | 744 | 369 |
-| 3d/Needle | 12 | 0 | 26 | 0 | 26 | 52 | 24 | 26 | 36 |
-| 3d/Far from origin | 32 | 0 | 150 | 0 | 150 | 300 | 192 | 150 | 139 |
 
 Observations:
 - facet clips ≈ 2 × steps: step 1 (source behind G) almost never rejects, so 1a's sphere test
@@ -111,18 +184,7 @@ Observations:
 **Phase 1 summary (2026-11-18): 1a (base vis half), 1b, 1d, 1e done; all exact.** `npm run bench
 -- --all` after phase 1 matches the phase 0 baseline in every non-timing column on all 26 levels
 (portals, Σ mightSee, steps, clips, Σ portalVis, Σ pvs; 3D Oblique lattice still truncates at the
-same step). Timings, same machine, single run (ms, baseline → after):
-
-| level | base vis | flow |
-|---|---|---|
-| 2d/Grid city 8×8 | 545 → ~230 | 403 → ~290 |
-| 2d/Maze 16×16 | 2671 → ~1130 | 262 → ~215 |
-| 2d/Pillar forest | 1610 → ~760 | 9974 → ~7400 |
-| 2d/Oblique lattice | 667 → ~250 | 3830 → ~2400 |
-| 3d/Grid city 6×6 | 1211 → ~650 | 858 → ~650 |
-| 3d/Pillar forest | 407 → ~190 | 2919 → ~2450 |
-| 3d/Overlap pile | 88 → 57 | 1084 → 814 |
-| 3d/Oblique lattice | 1134 → 476 | 117809 → 91530 (trunc) |
+same step).
 
 Left open, bench-driven: 1a flow half, 1c, 1f, 1g. The 3D flow is now dominated by step 4
 (per-generator reverse antipenumbra) and by step count: phase 2a is next.
@@ -151,21 +213,6 @@ Left open, bench-driven: 1a flow half, 1c, 1f, 1g. The 3D flow is now dominated 
   - Memory: slots (Σ out-degree) × portals bits, dense, no cap (removed 2026-11-18). E.g. 20k
     portals × 6 out-portals ≈ 300 MB. TODO: sparse rows if big OBJ levels need it.
 
-  Bench (`npm run bench -- --all --passages`; "base vis ms" = base + passage table; planes →
-  passages; timings = 2 runs, single-threaded):
-
-  | level | Σ mightSee | steps | base vis ms | flow ms |
-  |---|---|---|---|---|
-  | 2d/Grid city 8×8 | 408058 → 333996 | 84859 → 78820 | ~230 → ~330 | ~300 → ~295 |
-  | 2d/Maze 16×16 | 80250 → 70731 | 52424 → 50881 | ~1020 → ~1050 | ~205 → ~225 |
-  | 2d/Pillar forest | 1717614 → 1549352 | 2085171 → 1755139 | ~700–870 → ~1080–1220 | ~7000–7650 → ~6450 |
-  | 2d/Oblique lattice | 583538 → 514121 | 888221 → 589002 | 251 → 432 | 2332 → 1895 |
-  | 3d/Grid city 6×6 | 444235 → 387468 | 147259 → 132954 | ~630 → ~950 | ~620 → ~600 |
-  | 3d/Pillar forest | 296424 → 271308 | 500438 → 412033 | ~190 → ~510 | ~2440 → ~2130 |
-  | 3d/Vent grille | 51768 → 44892 | 50410 → 38022 | 42 → 90 | 169 → 148 |
-  | 3d/Overlap pile | 70416 → 69726 | 187356 → 129490 | 61 → 176 | 830 → 645 |
-  | 3d/Oblique lattice | 856051 → 835274 | 20 M (trunc) → **12499401** | 489 → 1724 | 89523 (trunc) → **68677** |
-
   Σ portalVis / Σ pvs identical everywhere except 3D Oblique lattice: 761912 → 750377 /
   69876 → 69245 (it now finishes instead of falling back to base vis). Net: big win on the
   worst case, small win on 2D Pillar forest / Oblique lattice, neutral 3D Pillar forest, loss on
@@ -183,20 +230,6 @@ Left open, bench-driven: 1a flow half, 1c, 1f, 1g. The 3D flow is now dominated 
     `packPortalGraph` + `BitSet.packRows` (typed arrays, memcpy clones): warm begin 2–9 ms.
   - **Thread count by cost** (`MIN_COST_PER_THREAD` = 400k units ≈ 20 ms): small tables build
     locally with no workers at all; others use ⌊cost / 400k⌋ threads at most.
-
-  Warm bench (`--repeat 3`, 12-core machine; table ms; total = base vis + table + flow, best of
-  4/11 threads; Σ pvs identical for 1/4/11 threads and to planes):
-
-  | level | table 1t | 4t | 11t | planes total | passages total |
-  |---|---|---|---|---|---|
-  | 2d/Grid city 8×8 | 116 | 51 | 48 | 517 | 573 |
-  | 2d/Maze 16×16 | 43 | local | local | 1261 | 1203 |
-  | 2d/Pillar forest | 440 | 173 | 149 | 8086 | **7535** |
-  | 2d/Oblique lattice | 179 | 65 | 53 | 2696 | **2235** |
-  | 3d/Grid city 6×6 | 352 | 126 | 115 | 1292 | 1310 |
-  | 3d/Pillar forest | 364 | 109 | 75 | 3043 | **2349** |
-  | 3d/Vent grille | 50 | 28 | 28 | 210 | 212 |
-  | 3d/Oblique lattice (cold, 1 run) | 1263 | | 413 | 90012 (trunc) | **66116** |
 
   Row building scales ~3–5×, not 11× (load imbalance at the tail, likely ~6 physical cores).
   With threads, passages win or tie on every heavy level except 2D Grid city (+11%); tiny levels
@@ -232,21 +265,6 @@ Left open, bench-driven: 1a flow half, 1c, 1f, 1g. The 3D flow is now dominated 
     when n·|P_A ∪ P_B| > (1 + maxGrowth)·(E_A + E_B) (E = exact Σ |pvs[l]| of the leaves). It must
     compare with the exact sums: a first version compared with the previous cluster rows, the
     growth compounded and 3D Pillar forest collapsed to 2 clusters at 0.25.
-
-  Bench (`npm run bench -- --pvs-cluster`, defaults; leaves include solid ones; Σ cluster pvs =
-  Σ over empty leaves of leaves in visible clusters, comparable to Σ pvs):
-
-  | level | leaves → clusters | Σ pvs → Σ cluster pvs |
-  |---|---|---|
-  | 2d/Grid city 8×8 | 755 → 377 | 43720 → 45720 (+5%) |
-  | 2d/Maze 16×16 | 2104 → 738 | 33839 → 36999 (+9%) |
-  | 2d/Pillar forest | 897 → 447 | 359021 → 391678 (+9%) |
-  | 2d/Serpentine | 118 → 76 | 563 → 563 |
-  | 2d/Oblique lattice | 467 → 324 | 74959 → 79303 (+6%) |
-  | 3d/Grid city 6×6 | 854 → 344 | 49998 → 54040 (+8%) |
-  | 3d/Maze 10×10 | 905 → 95 | 2683 → 2953 (+10%) |
-  | 3d/Pillar forest | 469 → 151 | 76099 → 83719 (+10%) |
-  | 3d/Vent grille | 254 → 60 | 12480 → 13736 (+10%) |
 
   `minWidth: 2` (refinement merges only) with the guard: tighter (3D Maze 905 → 200 at exact Σ),
   fewer merges elsewhere. `--pvs-cluster '{json}'` tunes it. Open: export layout for clusters
@@ -287,19 +305,6 @@ Left open, bench-driven: 1a flow half, 1c, 1f, 1g. The 3D flow is now dominated 
     forest flow 1700 ms / Σ pvs 510k, 3D Grid city 253 ms / 67k; without: 4091 ms / 421k and
     480 ms / 101k (greedy merge order matters).
 
-  Bench (`npm run bench -- --all --cluster`, default mode, single-threaded; Σ mightSee/portalVis
-  columns are over expanded leaf rows, not comparable; baseline = after phase 1):
-
-  | level | portals → flow portals | flow ms | steps | Σ pvs |
-  |---|---|---|---|---|
-  | 2d/Grid city 8×8 | 1504 → 1118 | ~290 → 191 | 84859 → 54175 | 43720 → 88714 |
-  | 2d/Maze 16×16 | 3316 → 2296 | ~215 → 84 | 52424 → 25909 | 33839 → 49775 |
-  | 2d/Pillar forest | 2684 → 2038 | ~7400 → 3739 | 2085171 → 1238072 | 359021 → 421458 |
-  | 2d/Oblique lattice | 1588 → 1344 | ~2400 → 1732 | 888221 → 705005 | 74959 → 91647 |
-  | 3d/Grid city 6×6 | 1886 → 1646 | ~650 → 524 | 147259 → 149971 | 49998 → 101314 |
-  | 3d/Pillar forest | 1120 → 922 | ~2450 → 1807 | 500438 → 397632 | 76099 → 85269 |
-  | 3d/Oblique lattice | 1742 → 1482 | 91530 (trunc) → 75503 (trunc) | 20 M → 20 M | 69876 → 71937 |
-
   With `--passages` too, 3D Oblique lattice finishes in 8.4 M steps / 41 s (passages alone:
   12.5 M / 69 s), Σ pvs 71684. Verdict: up to 2× faster flow for +10–100% Σ pvs: a draft-bake
   speed knob, not a default. Next ideas if pursued: a precision guard (refuse merges whose leaves'
@@ -311,18 +316,6 @@ Left open, bench-driven: 1a flow half, 1c, 1f, 1g. The 3D flow is now dominated 
   "facing" count); `splitCandidates(frags, maxCandidates)` takes an evenly spaced sample. Both
   live in the shared scoring, so the parallel build stays identical (tested). Scoring by portal
   area created was skipped: it needs a region ∩ plane op per candidate per node.
-  Bench (`npm run bench -- --bsp '{"facingWeight":4}'`, single run, timings noisy):
-
-  | level | leaves | portals | flow ms | Σ pvs |
-  |---|---|---|---|---|
-  | 2d/Grid city 8×8 | 755 → 737 | 1504 → 1592 | 333 → 460 | 43720 → 47584 |
-  | 2d/Maze 16×16 | 2104 → 1900 | 3316 → 3292 | 222 → 273 | 33839 → 34494 |
-  | 2d/Pillar forest | 897 → 839 | 2684 → 2548 | 7883 → 8478 | 359021 → 310586 |
-  | 3d/Grid city 6×6 | 854 → 711 | 1886 → 1900 | 670 → 854 | 49998 → 50520 |
-  | 3d/Maze 10×10 | 905 → 584 | 396 → 396 | 16 → 18 | 2683 → 2683 |
-  | 3d/Pillar forest | 469 → 357 | 1120 → 980 | 2735 → 1933 | 76099 → 60806 |
-  | 3d/Serpentine | 151 → 72 | 104 → 104 | 1 → 1 | 383 → 383 |
-
   Verdict: fewer leaves everywhere (up to 2×, mostly solid/coplanar fragments), but portal count
   and flow time are mixed (Grid cities worse, 3D Pillar forest −30% flow). Σ pvs is not comparable
   across different trees (different units). Weight 1 is neutral; 16 ≈ 4. `maxCandidates` (16) saved
@@ -395,12 +388,13 @@ Doors must block vis when closed, without rebaking.
 
 | Phase | Effort | Payoff |
 |---|---|---|
+| corner splits off by default (done) | S | flow 3–20×, base vis 2.5–50× on heavy levels; 3D Oblique lattice 90 s (trunc) → 3 s |
 | 0 bench (done) | S | required to judge everything |
 | 1a sphere reject (base vis done) | S | base vis 2–2.5× |
 | 1b separator cache (done) | M | flow −15–23% 2D, −2–8% 3D |
 | 2a + 2b passages + parallel table (done, option) | M | steps −3–37%, total −7–23% on open levels with threads; 3D Oblique lattice no longer truncates |
 | 3b PVS clusters (done, option) | M | 2–10× fewer PVS units for ≤ +10% Σ visible (precision guard) |
-| 3f splitter heuristic (done, option) | S | up to 2× fewer leaves; portals/flow mixed |
+| 3f splitter heuristic (done, option) | S | without corner splits: portals −5–50%, flow up to 10× faster; default-flip candidate |
 | 3c column sharing (done in core; export v3 open) | S | rows 1.2–6× narrower, lossless |
 | 1d allocation-free bitsets, 1e early-out (done) | S | flow −10–17% |
 | 3e convex leaf clusters (done, option) | S–M | flow up to 2× faster, Σ pvs +10–100%: draft bakes |

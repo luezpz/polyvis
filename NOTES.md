@@ -10,6 +10,9 @@ only decisions, gotchas and open items. The 2D/3D merge (former PLAN.md / PROGRE
   different primitives; sharing would need new `Geometry` ops for little gain.
 - Intentional parity gaps: probe-from-camera and work plane / brush height are 3D-only;
   vertex drag is 2D-only (3D brushes are planes).
+- Corner splits are off by default (2026-11-18). They multiplied leaves and portals, and the flow cost
+  grew far faster: with them off, flow is 3–20× faster and 3D Oblique lattice drops from 90 s
+  (truncated) to 3 s (docs/OPTIMIZATION-PLAN.md, re-baseline). The option stays for experiments.
 - Corner splits stay local: a wall is a candidate only for cells it touches itself. 3D touch
   must count point/edge contacts (`d3/core/bsp/refine.ts` clips raw vertices, not
   `clipWinding`, which drops zero-area remnants); cells beside a doorway often meet the lintel or
@@ -87,7 +90,7 @@ only decisions, gotchas and open items. The 2D/3D merge (former PLAN.md / PROGRE
   (`vis/pvsClusters.ts` → `CompileResult.pvsClusters`); `pvs` stays per leaf. Not the same as 3e
   vis clusters (`cluster`), which change the flow. The `maxGrowth` guard must compare with exact leaf
   sums, not previous cluster rows (growth compounds otherwise). Not in the export yet.
-- Phase 3f BSP options `facingWeight`, `maxCandidates` (off by default; results mixed). Any splitter
+- Phase 3f BSP options `facingWeight`, `maxCandidates` (off by default; mixed with corner splits, a clear win without them: default-flip candidate). Any splitter
   change must go through `splitCandidates`/`scoreSplitters` so the parallel BSP stays identical.
 - `Geometry.facetMeasure` (2D length, 3D area) was added for 3b.
 
