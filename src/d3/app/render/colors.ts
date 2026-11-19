@@ -24,6 +24,8 @@ export const GL_COLORS = {
   portalVisFill: [0.25, 0.88, 1, 0.18],
   pvsCurrent: [0.35, 0.86, 0.47, 1],
   pvsHidden: [0.16, 0.17, 0.19, 1],
+  /** In the PVS but culled by runtime portal clipping. */
+  pvsRuntimeCulled: [0.85, 0.5, 0.2, 1],
   surfaceNeutral: [0.62, 0.64, 0.68, 1],
   ray: [1, 1, 1, 0.16],
   leak: [1, 0.23, 0.23, 0.95],

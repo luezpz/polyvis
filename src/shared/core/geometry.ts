@@ -141,4 +141,10 @@ export interface Geometry<D extends Dim> {
   separators(from: Facet<D>, to: Facet<D>): Plane<D>[];
   /** `facet` clipped to the front of every plane in order (`clipFacet` each); null once it vanishes. */
   clipFacetToPlanes(facet: Facet<D>, planes: readonly Plane<D>[]): Facet<D> | null;
+  /**
+   * The view cone from `eye` through `facet` (runtime portal clipping, phase 4): planes through
+   * the eye and each facet edge (2D: each endpoint), facing into the cone. A point is inside iff
+   * it is in front of every plane. Null if the eye lies on the facet's plane (edge-on: no cone).
+   */
+  portalFrustum(eye: Vec<D>, facet: Facet<D>): Plane<D>[] | null;
 }

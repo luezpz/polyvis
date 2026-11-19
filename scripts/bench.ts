@@ -8,6 +8,7 @@ import * as d2 from "../src/d2/core";
 import * as d3 from "../src/d3/core";
 import { geometry2 } from "../src/d2/core/geometry";
 import { geometry3 } from "../src/d3/core/geometry";
+import { runtimeHeader, runtimeRow } from "./benchRuntime";
 import { type BitSet, type CompileOptions, type CompileResult, type Dim, type Geometry, type RowWorker, type StageRunners, computeBaseVisParallel, computePassagesParallel, computePortalFlow } from "../src/shared/core";
 
 /** One bench thread (see `bench.mjs`): sends a request, resolves with its response. */
@@ -15,6 +16,9 @@ export type ThreadCall = (req: object) => Promise<{ words?: Uint32Array }>;
 
 /** Levels slower than this many seconds are skipped unless `--all` (3D Oblique lattice ~110 s). */
 const SLOW = new Set(["3d/Oblique lattice"]);
+
+/** Flow step budget in `--runtime` mode (without `--exact-pvs`): enough for small levels to finish exactly. */
+const RUNTIME_FLOW_STEPS = 200_000;
 
 interface Case {
   readonly name: string;
@@ -92,9 +96,13 @@ export async function main(args: readonly string[], readText: (path: string) => 
   const all = args.includes("--all");
   const only = flag("--only");
   const repeat = Math.max(1, Number(flag("--repeat") ?? 1));
-  const opts: Partial<CompileOptions> = { ...(args.includes("--passages") ? { baseVis: "passages" } : {}), ...(args.includes("--cluster") ? { cluster: "convex" } : {}), ...(args.includes("--pvs-cluster") ? { pvsCluster: "wide", pvsClusterOptions: flag("--pvs-cluster")?.startsWith("{") ? JSON.parse(flag("--pvs-cluster")!) : {} } : {}),
+  const opts: { -readonly [K in keyof CompileOptions]?: CompileOptions[K] } = { ...(args.includes("--passages") ? { baseVis: "passages" } : {}), ...(args.includes("--cluster") ? { cluster: "convex" } : {}), ...(args.includes("--pvs-cluster") ? { pvsCluster: "wide", pvsClusterOptions: flag("--pvs-cluster")?.startsWith("{") ? JSON.parse(flag("--pvs-cluster")!) : {} } : {}),
     ...(flag("--bsp") ? { bsp: JSON.parse(flag("--bsp")!) } : {}) };
-  const header = ["level", "bsp ms", "total ms", "portals", "vis portals", "clusters ms", "base vis ms", "passage ms", "Σ mightSee", "flow ms", "steps", "facet clips", "separator clips", "Σ portalVis", "Σ pvs", "leaves", "pvs rows", "pvs columns", ...(opts.pvsCluster ? ["pvs clusters", "cluster rows", "Σ cluster pvs (leaves)"] : [])];
+  const runtime = args.includes("--runtime");
+  // Runtime mode times the queries, not the compile: cap the flow so heavy levels compile in seconds.
+  // A truncated flow falls back to base vis, a looser but valid PVS prefilter ("pvs" column marks it).
+  if (runtime && !args.includes("--exact-pvs")) opts.flow = { ...opts.flow, maxSteps: RUNTIME_FLOW_STEPS };
+  const header = runtime ? runtimeHeader() : ["level", "bsp ms", "total ms", "portals", "vis portals", "clusters ms", "base vis ms", "passage ms", "Σ mightSee", "flow ms", "steps", "facet clips", "separator clips", "Σ portalVis", "Σ pvs", "leaves", "pvs rows", "pvs columns", ...(opts.pvsCluster ? ["pvs clusters", "cluster rows", "Σ cluster pvs (leaves)"] : [])];
   console.log(`| ${header.join(" | ")} |\n|${header.map(() => "---").join("|")}|`);
   const objPath = flag("--obj");
   for (const c of cases(objPath ? { path: objPath, text: readText(objPath) } : null, opts, threads)) {
@@ -102,6 +110,11 @@ export async function main(args: readonly string[], readText: (path: string) => 
     if (!all && (SLOW.has(c.name) || c.group?.startsWith("Edge"))) continue;
     let r = await c.compile();
     for (let k = 1; k < repeat; k++) r = await c.compile();
+    if (runtime) {
+      if (args.includes("--verbose")) console.error(`${c.name}: compiled, stages ${r.timings.map((t) => `${t.stage} ${t.ms.toFixed(0)}`).join(", ")}`);
+      console.log(`| ${runtimeRow(c.name, r).join(" | ")} |`);
+      continue;
+    }
     const f = r.flowStats;
     const row = [c.name, ms(r, "bsp").toFixed(0), r.timings.reduce((s, t) => s + t.ms, 0).toFixed(0), r.graph.portals.length, r.clusters?.portalCount ?? r.graph.portals.length, ms(r, "clusters").toFixed(0), ms(r, "base vis").toFixed(0), (ms(r, "passage vis") + ms(r, "passage flood")).toFixed(0), total(r.mightSee), ms(r, "portal flow").toFixed(0),
       f.steps + (f.truncated ? " (trunc)" : ""), f.facetClips, f.separatorClips, total(r.portalVis), total(r.pvs), r.pvs.length, r.pvsTable.rows.length, r.pvsTable.columnRows[0]?.size ?? 0, ...(r.pvsClusters ? clusterCols(r) : [])];

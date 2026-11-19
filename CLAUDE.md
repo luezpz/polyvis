@@ -39,6 +39,8 @@ src/shared/core/      dimension-agnostic compiler, generic over D extends Dim
   parallel/           workerQueue (next idle worker), costChunks, threadsFor
   spatial/bvh.ts      BVH over boxes (CSG broad phase)
   vis/                BitSet, base vis, clusterRows (cluster rows → leaf portals), passages (canSee table), parallelRows (base vis + passages on workers), portal flow (+ exact parallel dependency scheduler), leaf PVS, shared PVS rows + columns (pvsTable), PVS clusters (pvsClusters, phase 3b), incremental base vis + flow (portalMatch, incrementalBaseVis, incrementalFlow, phase 3.5)
+  runtime/            runtime portal clipping (phase 4): visibleLeaves (planes / rect modes), View camera,
+                      object/light culling (leavesInBounds, lightLeaves), packRuntime typed-array export
   pipeline.ts         createCompiler(config) → { compileLevel, compileWalls }
   export/pvsRows.ts   decodePvsRow
   gen/maze.ts         seeded RNG + maze generator for demo levels

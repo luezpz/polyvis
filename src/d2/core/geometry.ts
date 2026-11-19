@@ -12,6 +12,7 @@ import {
   polygonFromAabb, sameOrientedLine, signedDistance,
 } from "./math";
 import { packPolygon, packSegment, unpackPolygon, unpackSegment } from "./pack";
+import { portalFrustum2 } from "./runtime/portalFrustum";
 import { buildSeparators, clipToLines, clipToSeparators } from "./vis/antipenumbra";
 
 export type Dim2 = Dim<Vec2, Segment, ConvexPolygon>;
@@ -46,4 +47,5 @@ export const geometry2: Geometry<Dim2> = {
   clipToSeparators,
   separators: (from, to) => buildSeparators(from, to),
   clipFacetToPlanes: clipToLines,
+  portalFrustum: portalFrustum2,
 };

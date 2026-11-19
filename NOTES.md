@@ -99,6 +99,12 @@ only decisions, gotchas and open items. The 2D/3D merge (former PLAN.md / PROGRE
   bit-identical to fresh. Single-threaded, not wired into the editors yet. BSP is now the largest stage on
   closed levels and its instability limits 3D reuse.
 
+- Phase 4 runtime clipping (`shared/core/runtime`): `visibleLeaves` with `clip: "planes"` (precise: clip the
+  winding, next frustum = cone through the clipped winding via `Geometry.portalFrustum`) or `"rect"` (screen
+  rects; omnidirectional = cube map of 6 / 4 views). A leaf is re-entered only with a frustum / rect not
+  contained in an earlier one (subsumption cut; without it 3D Pillar forest hung). Bench: `--runtime`
+  (flow capped for speed; `--exact-pvs` to disable). Open: write `packRuntime` data into the export files.
+
 ## Gotchas
 - The flow's separator cache (1b) relies on `clipFacet` returning the **same object** when nothing
   is cut (both kernels do); `Geometry.separators` must list planes in `clipToSeparators` order.

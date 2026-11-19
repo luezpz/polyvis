@@ -224,7 +224,12 @@ export class App implements PanelHost, ToolContext {
     if (inspect.fromCamera) inspect.point = this.camera.eye;
     if (!r || !inspect.point) return null;
     const leaf = locateLeaf(r.tree, inspect.point);
-    return r.tree.leaves[leaf].contents === "empty" ? { point: inspect.point, leaf } : null;
+    if (r.tree.leaves[leaf].contents !== "empty") return null;
+    if (!inspect.fromCamera) return { point: inspect.point, leaf };
+    // Probing from the camera: runtime clipping uses the real view (screen rect = tangents of the half fov).
+    const { forward, right, up } = this.camera.basis();
+    const ty = Math.tan(this.camera.fovY / 2), tx = ty * this.camera.aspect;
+    return { point: inspect.point, leaf, view: { forward, axes: [right, up], rect: { min: [-tx, -ty], max: [tx, ty] } } };
   }
 
   // ---- Input -------------------------------------------------------------

@@ -19,6 +19,10 @@ export interface BaseLayers {
   labels: boolean;
   pvs: boolean;
   lineOfSight: boolean;
+  /** Runtime portal clipping from the probe (phase 4): PVS leaves it culls get their own colour. */
+  runtime: boolean;
+  /** Runtime clipping uses cheap screen rects instead of precise planes. */
+  runtimeRect: boolean;
 }
 
 /** Default panel labels of the shared layers; dimensions may override individual entries. */
@@ -35,6 +39,8 @@ export const BASE_LAYER_LABELS: Readonly<Record<keyof BaseLayers, string>> = {
   labels: "Leaf / portal ids",
   pvs: "PVS of probed leaf",
   lineOfSight: "True line of sight",
+  runtime: "Runtime portal clipping (probe)",
+  runtimeRect: "Runtime clip: cheap rect mode",
 };
 
 /** What the inspect tool is probing; `V` is the dimension's vector type. */

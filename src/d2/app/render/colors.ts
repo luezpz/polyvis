@@ -20,6 +20,8 @@ export const COLORS = {
   pvsCurrent: "rgba(90, 220, 120, 0.55)",
   pvsVisible: "rgba(90, 220, 120, 0.22)",
   pvsHidden: "rgba(0, 0, 0, 0.55)",
+  /** In the PVS but culled by runtime portal clipping. */
+  pvsRuntimeCulled: "rgba(255, 150, 40, 0.30)",
   lineOfSight: "rgba(255, 255, 255, 0.10)",
   lineOfSightStroke: "rgba(255, 255, 255, 0.35)",
   probe: "#ffffff",

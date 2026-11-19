@@ -15,7 +15,7 @@
 
 import {
   type CompileResult, type Level, type Vec3,
-  addScaled, castRay, locateLeaf, normalize, polyhedronCenter, sphereDirections, splitterWindings, windingCenter, aabbDiagonal,
+  type BitSet, type View, addScaled, castRay, locateLeaf, visibleLeaves, normalize, polyhedronCenter, sphereDirections, splitterWindings, windingCenter, aabbDiagonal,
 } from "../../core";
 import type { Camera } from "../editor/camera";
 import type { ViewState } from "../editor/viewState";
@@ -29,6 +29,8 @@ export interface Probe {
   readonly point: Vec3;
   /** Empty leaf containing the probe point. */
   readonly leaf: number;
+  /** Camera view when probing from the camera (runtime clipping then uses the real frustum); else omnidirectional. */
+  readonly view?: View;
 }
 
 export interface SceneInput {
@@ -106,7 +108,7 @@ export class Renderer {
     const probe = scene.probe;
     const rays = result && probe && layers.lineOfSight ? this.lineOfSight(result, probe) : null;
 
-    this.surfaces.update([result, layers.surfaces, layers.pvs, layers.hideCulled, layers.clusters, layers.pvsHeat, probe?.leaf], () => this.buildSurfaces(result, scene.view, probe));
+    this.surfaces.update([result, layers.surfaces, layers.pvs, layers.hideCulled, layers.clusters, layers.pvsHeat, probe?.leaf, layers.runtime, layers.runtimeRect, ...runtimeKey(probe, layers.runtime)], () => this.buildSurfaces(result, scene.view, probe));
     this.lines.update([result, layers.walls, layers.leaves, layers.splitters], () => this.buildLines(result, scene.view));
     this.grid.update([layers.grid, scene.view.workZ, scene.view.gridSize, ...this.gridAnchor(scene.view.gridSize)], () => this.buildGrid(scene.view));
     this.fills.update([result, scene.level, layers.portals, layers.brushes, hovered], () => this.buildFills(result, scene, hovered));
@@ -154,6 +156,7 @@ export class Renderer {
     const tb = new TriangleBuilder();
     if (!result || !view.layers.surfaces) return tb.build();
     const row = probe && view.layers.pvs ? result.pvs[probe.leaf] : null;
+    const live = row && view.layers.runtime ? runtimeVisible(result, probe!, view.layers.runtimeRect) : null;
     const n = GL_COLORS.surfaceNeutral;
     result.surfaces.forEach((surfs, leaf) => {
       if (surfs.length === 0) return;
@@ -162,6 +165,9 @@ export class Renderer {
       else if (row && !row.has(leaf)) {
         if (view.layers.hideCulled) return;
         color = GL_COLORS.pvsHidden;
+      } else if (live && !live.has(leaf)) {
+        if (view.layers.hideCulled) return;
+        color = GL_COLORS.pvsRuntimeCulled;
       } else if (view.layers.pvsHeat) {
         color = [...heatRgb(debugInfo(result).pvsHeat[leaf]), 1];
       } else {
@@ -368,4 +374,19 @@ export class Renderer {
 
 function kindCssBright(kind: "room" | "solid"): string {
   return kind === "room" ? "#8cc6ff" : "#ff8c9b";
+}
+
+/**
+ * Leaves the runtime portal-clipping query keeps from `probe` (phase 4), PVS-prefiltered: through the
+ * camera frustum when probing from the camera, else omnidirectional (rect mode: cube map of rects).
+ */
+function runtimeVisible(result: CompileResult, probe: Probe, rect: boolean): BitSet {
+  return visibleLeaves(result.graph, probe.leaf, probe.point, { clip: rect ? "rect" : "planes", view: probe.view, pvsRow: result.pvs[probe.leaf] });
+}
+
+/** Cache key of {@link runtimeVisible}'s inputs (point and view direction; empty when the layer is off). */
+function runtimeKey(probe: Probe | null, on: boolean): number[] {
+  if (!probe || !on) return [];
+  const { point: p, view: v } = probe;
+  return [p.x, p.y, p.z, ...(v ? [v.forward.x, v.forward.y, v.forward.z, ...v.rect!.max] : [])];
 }

@@ -92,6 +92,21 @@ describe.each(kernels)("%s geometry kernel", (_, g) => {
 });
 
 /** A facet spanning x ∈ [0, 1] (2D: segment along y = 0.5; 3D: square in z = 0.5). */
+describe.each(kernels)("%s portalFrustum", (_, g) => {
+  // spanning(): on y = 0.5 (2D) / z = 0.5 (3D), x and the other axis in [0, 1].
+  const pt = (x: number, h: number) => (g.dimension === 2 ? { x, y: h } : { x, y: 0.5, z: h });
+  it("contains the cone beyond the facet, excludes points beside it, null when edge-on", () => {
+    const planes = g.portalFrustum(pt(0.5, 0), spanning(g))!;
+    expect(planes).toHaveLength(g.dimension === 2 ? 2 : 4);
+    const inside = (p: unknown) => planes.every((pl) => g.signedDistance(pl, p) > 0);
+    expect(inside(pt(0.5, 2))).toBe(true);
+    expect(inside(pt(0.9, 0.6))).toBe(true);
+    expect(inside(pt(3, 2))).toBe(false);
+    expect(inside(pt(-2, 2))).toBe(false);
+    expect(g.portalFrustum(pt(5, 0.5), spanning(g))).toBeNull();
+  });
+});
+
 function spanning(g: Geometry<Dim>): unknown {
   if (g.dimension === 2) return { a: { x: 0, y: 0.5 }, b: { x: 1, y: 0.5 } };
   return [{ x: 0, y: 0, z: 0.5 }, { x: 1, y: 0, z: 0.5 }, { x: 1, y: 1, z: 0.5 }, { x: 0, y: 1, z: 0.5 }];

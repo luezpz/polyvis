@@ -11,6 +11,7 @@ export * from "./bsp";
 export * from "./portals";
 export * from "./vis";
 export * from "./pipeline";
+export * from "./runtime";
 export * from "./export/pvsExport";
 export * from "./import/obj";
 export * from "./analysis/visibility";

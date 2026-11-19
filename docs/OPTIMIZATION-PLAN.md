@@ -432,6 +432,40 @@ Pure TS module `src/shared/core/runtime/` (no DOM; usable in editor preview and 
   touch (BSP query); drawn/lit only if a touched leaf is visible. Lights can also traverse
   from their own leaf to find the leaves they reach (Doom 3 light/area interaction).
 
+**Status (2026-11-20): done** (in `src/shared/core/runtime/`, bound per dimension in `d{2,3}/core/runtime/`).
+- Query `visibleLeaves(graph, cameraLeaf, eye, { clip, view, frustum, pvsRow, portalOpen })`, two modes:
+  - `"planes"` (precise, default): each portal winding is clipped to the current frustum, and the next
+    frustum is the cone through the *clipped* winding (`Geometry.portalFrustum`), so a frustum stays a
+    plain plane list instead of needing frustum intersection.
+  - `"rect"` (cheap, Doom 3): the winding is projected to a screen rect (`projectRect`) and intersected
+    with the current one. A winding straddling the eye plane keeps the current rect (conservative).
+  Without a `view`, planes mode is omnidirectional and rect mode is the union over a cube map of 90°
+  views (`axisViews`). Leaves are not visited once (each path has its own frustum/rect); only
+  re-entering a leaf on the current path is cut. Camera: `View` (forward, screen axes, tangent rect),
+  `viewToward` per dimension, `viewFrustum` for the planes mode.
+- Culling: `leavesInBounds(tree, box)` (BSP walk, register an object once per move), `anyVisible`,
+  `lightLeaves` (omnidirectional query from the light ∩ its radius box; closed doors block light).
+- Export: `packRuntime(graph, pvsTable, closed)` → typed arrays (CSR leaf → portals, planes, winding
+  vertices, `portalClosed`, shared PVS rows). Not yet written into the JSON/text export files.
+- Editor: layers "Runtime portal clipping (probe)" and "Runtime clip: cheap rect mode". PVS leaves the
+  query culls are orange. 3D "probe from camera" uses the real camera frustum; other probes are
+  omnidirectional. Checked in headless Chrome (no console errors).
+- Tests (`tests/d*/runtime.test.ts`, contract in `tests/shared`): both modes ⊆ PVS row and never miss a
+  ray-visible leaf in the view; planes ⊆ rect; rect is looser somewhere; closed portals block;
+  culling and export round-trip.
+- Subsumption cut: a leaf is not re-entered with a frustum / rect contained in one it already had
+  (same apex, so nothing new is reachable). Without it 3D Pillar forest queries hung (> 10 min for
+  64 eyes); with it 0.7 ms per query.
+- Bench: `npm run bench -- --runtime [--exact-pvs] [--verbose]` (`scripts/benchRuntime.ts`): 64 seeded
+  eyes per level, four modes (planes / rect × omnidirectional / 90° camera): mean and max µs,
+  visible leaves, portal crossings. The flow is capped at 200 k steps so heavy levels compile fast
+  (truncated levels use the base-vis PVS, marked "(base)"); the default set runs in ~5 s.
+  Findings: planes cam 8–260 µs; omnidirectional rect is *slower* than omnidirectional planes
+  (6 cube views, 2–5× the crossings); through a camera, rect costs about the same as planes but
+  keeps more leaves. Rect only pays off where clipping a winding costs more than a box test.
+- Example (2D Grid city 8×8, leaf centroid, omnidirectional): PVS 46 leaves, rect 13, planes 7.
+  3D Grid city 6×6, camera view: PVS 27, rect 15, planes 3.
+
 ### Phase 4b: occluding doors (Doom 3 areaportals)
 
 Doors must block vis when closed, without rebaking.
@@ -477,6 +511,6 @@ Doors must block vis when closed, without rebaking.
 | 1d allocation-free bitsets, 1e early-out (done) | S | flow −10–17% |
 | 3e convex leaf clusters (done, option) | S–M | flow up to 2× faster, Σ pvs +10–100%: draft bakes |
 | 3.5 CSG BVH (done), incremental base vis + flow (done in core, `compileSession`) | M | CSG up to 28× faster; closed levels recompile 2× faster after an edit; editor wiring + stable BSP open |
-| 4 runtime clipping | L | runtime culling |
+| 4 runtime clipping (done: planes + rect modes, culling, typed-array export, editor layer) | L | runtime culling: e.g. PVS 46 → 7 leaves |
 | 4b occluding doors | M | closed doors hide rooms, no rebake |
 | 1c, 1f, 1g, 3a (no-op on leaves), 3d, 5 | S–M | situational, bench-driven |

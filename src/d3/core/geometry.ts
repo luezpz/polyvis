@@ -12,6 +12,7 @@ import {
   polyhedronFromAabb, polyhedronVertices, sameOrientedPlane, signedDistance, windingArea,
 } from "./math";
 import { packPolyhedron, packWinding, unpackPolyhedron, unpackWinding } from "./pack";
+import { portalFrustum3 } from "./runtime/portalFrustum";
 import { buildSeparators, clipToPlanes, clipToSeparators } from "./vis/antipenumbra";
 
 export type Dim3 = Dim<Vec3, Winding, ConvexPolyhedron>;
@@ -46,4 +47,5 @@ export const geometry3: Geometry<Dim3> = {
   clipToSeparators,
   separators: (from, to) => buildSeparators(from, to),
   clipFacetToPlanes: clipToPlanes,
+  portalFrustum: portalFrustum3,
 };

@@ -6,7 +6,7 @@
 
 import {
   type CompileResult, type Level, type Vec2,
-  centroid, locateLeaf, midpoint, splitterSegments, visibilityPolygon, addScaled,
+  type BitSet, centroid, locateLeaf, midpoint, splitterSegments, visibilityPolygon, addScaled, visibleLeaves,
 } from "../../core";
 import type { Camera } from "../editor/camera";
 import type { ViewState } from "../editor/viewState";
@@ -28,6 +28,7 @@ export class Renderer {
   private readonly painter: Painter;
   /** Splitter segments are cached per compile result. */
   private splitterCache: { result: CompileResult; segments: ReturnType<typeof splitterSegments> } | null = null;
+  private runtimeCache: { result: CompileResult; x: number; y: number; clip: string; value: BitSet } | null = null;
 
   constructor(private readonly canvas: HTMLCanvasElement, private readonly camera: Camera) {
     const ctx = canvas.getContext("2d");
@@ -130,11 +131,27 @@ export class Renderer {
     const current = locateLeaf(result.tree, p);
     if (result.tree.leaves[current].contents !== "empty") return;
     const row = result.pvs[current];
+    const live = this.runtimeVisible(result, view, current, p);
     result.tree.leaves.forEach((leaf, i) => {
       if (leaf.contents !== "empty" || !leaf.region) return;
-      const fill = i === current ? COLORS.pvsCurrent : row.has(i) ? COLORS.pvsVisible : COLORS.pvsHidden;
+      const fill = i === current ? COLORS.pvsCurrent : !row.has(i) ? COLORS.pvsHidden : live && !live.has(i) ? COLORS.pvsRuntimeCulled : COLORS.pvsVisible;
       this.painter.polygon(leaf.region.vertices, fill);
     });
+  }
+
+  /**
+   * Leaves the runtime portal-clipping query keeps from probe point `p` in leaf `leaf`
+   * (omnidirectional; rect mode = cube map of screen rects), PVS-prefiltered. Null with the layer off.
+   * Cached per (result, point, mode): it runs every frame otherwise.
+   */
+  private runtimeVisible(result: CompileResult, view: ViewState, leaf: number, p: Vec2): BitSet | null {
+    if (!view.layers.runtime) return null;
+    const clip = view.layers.runtimeRect ? "rect" : "planes";
+    const c = this.runtimeCache;
+    if (c && c.result === result && c.x === p.x && c.y === p.y && c.clip === clip) return c.value;
+    const value = visibleLeaves(result.graph, leaf, p, { clip, pvsRow: result.pvs[leaf] });
+    this.runtimeCache = { result, x: p.x, y: p.y, clip, value };
+    return value;
   }
 
   /** Exact visibility polygon from the probe point — the PVS must always cover it. */
@@ -191,7 +208,8 @@ export class Renderer {
       const leaf = locateLeaf(result.tree, p);
       if (result.tree.leaves[leaf].contents === "empty") current = leaf;
     }
-    const row = current >= 0 ? result.pvs[current] : null;
+    // With runtime clipping on, surfaces are coloured by what the runtime query keeps (⊆ PVS).
+    const row = current >= 0 ? (this.runtimeVisible(result, view, current, p!) ?? result.pvs[current]) : null;
     result.surfaces.forEach((surfs, leaf) => {
       let color: string = COLORS.surface;
       if (row && leaf === current) color = COLORS.surfaceCurrent;
