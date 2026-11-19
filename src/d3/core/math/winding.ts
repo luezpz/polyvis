@@ -64,6 +64,9 @@ export function classifyWinding(plane: Plane3, w: Winding, eps = PLANE_EPSILON):
   return front ? Side.Front : back ? Side.Back : Side.On;
 }
 
+/** Signed distances scratch for {@link clipWinding} (grown on demand; not re-entrant, which it never is). */
+let clipScratch = new Float64Array(64);
+
 /**
  * Keeps the part of `w` in front of `plane` (Sutherland–Hodgman).
  *
@@ -77,10 +80,14 @@ export function classifyWinding(plane: Plane3, w: Winding, eps = PLANE_EPSILON):
  */
 export function clipWinding(w: Winding, plane: Plane3, eps = PLANE_EPSILON): Winding | null {
   const n = w.length;
-  const dist = new Array<number>(n);
+  // Hot loop (flow, CSG, BSP regions): reused scratch + signedDistance inlined (same arithmetic, so same bits).
+  if (clipScratch.length < n) clipScratch = new Float64Array(Math.max(n, 2 * clipScratch.length));
+  const dist = clipScratch;
+  const { x: nx, y: ny, z: nz } = plane.n, pd = plane.d;
   let anyFront = false, anyBack = false;
   for (let i = 0; i < n; i++) {
-    const s = signedDistance(plane, w[i]);
+    const q = w[i];
+    const s = nx * q.x + ny * q.y + nz * q.z - pd;
     dist[i] = s;
     if (s > eps) anyFront = true;
     else if (s < -eps) anyBack = true;
