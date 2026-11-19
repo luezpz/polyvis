@@ -34,9 +34,10 @@ src/shared/core/      dimension-agnostic compiler, generic over D extends Dim
   wall.ts             Wall<D> (BSP input)
   bsp/                build (subtree tasks + assembly), parallel build, pack (flat worker
                       messages), refine (corner/size splits), query, leaf surfaces, types
-  portals/            Portal<D>/PortalGraph<D> types, components, leak detection, pack (flat worker messages)
+  portals/            Portal<D>/PortalGraph<D> types, components, leak detection, pack (flat worker messages),
+                      clusters (convex leaf clusters, phase 3e)
   parallel/           workerQueue (next idle worker), costChunks, threadsFor
-  vis/                BitSet, base vis, passages (canSee table), parallelRows (base vis + passages on workers), portal flow (+ exact parallel dependency scheduler), leaf PVS, shared PVS rows
+  vis/                BitSet, base vis, clusterRows (cluster rows → leaf portals), passages (canSee table), parallelRows (base vis + passages on workers), portal flow (+ exact parallel dependency scheduler), leaf PVS, shared PVS rows + columns (pvsTable), PVS clusters (pvsClusters, phase 3b)
   pipeline.ts         createCompiler(config) → { compileLevel, compileWalls }
   export/pvsRows.ts   decodePvsRow
   gen/maze.ts         seeded RNG + maze generator for demo levels
@@ -54,6 +55,7 @@ src/shared/app/        browser code shared by both editors (never imported by co
                       bspPool/bspProtocol, rowPool/rowProtocol, flowPool/flowProtocol)
   ui/                 dom helpers, panel widgets, compile panel sections, base styles.css
   render/palette.ts   brush-kind colours, leaf hue
+  render/debugInfo.ts per-result debug data (portal kinds, clusters, PVS heat) for the debug layers
 src/d2/app, src/d3/app   editors (separate on purpose; see NOTES.md)
 tests/shared          Geometry contract tests run against both kernels
 tests/d2, tests/d3    per-dimension suites (originally from polyvis2d / polyvis3d)

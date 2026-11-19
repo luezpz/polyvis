@@ -209,23 +209,125 @@ Left open, bench-driven: 1a flow half, 1c, 1f, 1g. The 3D flow is now dominated 
 ## Phase 3: smaller graph
 
 3a. **Portal merging**: coplanar portals between the same leaf pair whose union is convex.
+  **Status: no-op on the leaf graph (2026-11-18).** Two convex leaves touch on one plane in one
+  convex facet, and portal discovery emits one portal per (leaf pair, plane): there is never more
+  than one portal per pair. It would only matter between 3e clusters (several leaf portals from
+  one cluster into the same neighbour); needs a facet-union `Geometry` op. Not done.
 3b. **Clusters** (lossy, fewer units).
   - Merge leaves joined by wide portals (area ≥ ~0.5 × leaf cross-section, tune) plus leaves
     split only by refinement. `leafCluster[leaf]` → cluster id.
   - Export PVS per cluster: source row = OR of its leaves' rows, bits = clusters.
   - Flow on leaves (exact, then cluster at export) or on clusters (faster, looser): option.
   - Tests: cluster PVS ⊇ leaf PVS mapped to clusters; LOS tests via leaf → cluster lookup.
+  **Status: done as option `pvsCluster: "wide"` (2026-11-18), default `"none"`.** Flow on leaves
+  (exact as before; `pvs` unchanged), clustering at export: `vis/pvsClusters.ts`
+  (`buildPvsClusters` → `CompileResult.pvsClusters`: `leafCluster`, `count`, cluster `pvs`, and its
+  3c `table`). Non-convex clusters are fine since no flow runs on them. Merge candidates: portals
+  with measure ≥ `minWidth` × the smaller leaf's largest boundary piece (new `Geometry.facetMeasure`:
+  2D length, 3D area), and refinement-split portals; widest first. Findings:
+  - The width test alone barely discriminates (corridor portals span the full cross-section;
+    `minWidth` 0.5 and 0.9 give the same clusters) and costs up to 3× Σ visible (Serpentine,
+    Grid city 2.5×).
+  - Fix: **precision guard** `maxGrowth` (default 0.1). The leaf PVS is known, so a merge is refused
+    when n·|P_A ∪ P_B| > (1 + maxGrowth)·(E_A + E_B) (E = exact Σ |pvs[l]| of the leaves). It must
+    compare with the exact sums: a first version compared with the previous cluster rows, the
+    growth compounded and 3D Pillar forest collapsed to 2 clusters at 0.25.
+
+  Bench (`npm run bench -- --pvs-cluster`, defaults; leaves include solid ones; Σ cluster pvs =
+  Σ over empty leaves of leaves in visible clusters, comparable to Σ pvs):
+
+  | level | leaves → clusters | Σ pvs → Σ cluster pvs |
+  |---|---|---|
+  | 2d/Grid city 8×8 | 755 → 377 | 43720 → 45720 (+5%) |
+  | 2d/Maze 16×16 | 2104 → 738 | 33839 → 36999 (+9%) |
+  | 2d/Pillar forest | 897 → 447 | 359021 → 391678 (+9%) |
+  | 2d/Serpentine | 118 → 76 | 563 → 563 |
+  | 2d/Oblique lattice | 467 → 324 | 74959 → 79303 (+6%) |
+  | 3d/Grid city 6×6 | 854 → 344 | 49998 → 54040 (+8%) |
+  | 3d/Maze 10×10 | 905 → 95 | 2683 → 2953 (+10%) |
+  | 3d/Pillar forest | 469 → 151 | 76099 → 83719 (+10%) |
+  | 3d/Vent grille | 254 → 60 | 12480 → 13736 (+10%) |
+
+  `minWidth: 2` (refinement merges only) with the guard: tighter (3D Maze 905 → 200 at exact Σ),
+  fewer merges elsewhere. `--pvs-cluster '{json}'` tunes it. Open: export layout for clusters
+  (with 3c's v3), flow on clusters (that is 3e).
 3c. **Keep PVS indirection, extend it** (lossless, same units; stacks on clusters).
   - `PvsTable` stays: dedup rows of whatever the unit is (leaves or clusters); clustering
     saturates rows, so duplicates get more common, not less.
   - Add column sharing: group units with identical columns, store one bit per group,
     `unitColumn[unit]` → group. Decoding stays bit-exact.
   - Order: cluster (optional) → dedup rows → share columns.
+  **Status: done in core (2026-11-18), always built (lossless).** `buildPvsTable` adds
+  `leafColumn` + `columnRows` (rows narrowed to one bit per column group); `pvsTableSees(t, a, b)`
+  decodes; tests check bit-exact decoding against `pvs` in both dims. Finding: groups = distinct
+  rows on every bench level except 3D Oblique lattice (178 rows / 218 groups, truncated flow): the
+  leaf PVS is (near) symmetric, so identical columns ⇔ identical rows. The payoff is width:
+  rows × leaves → rows × groups bits, e.g. 2D Maze 16×16 1282 × 2104 → 1282 × 1282, 3D Maze
+  10×10 151 × 905 → 151 × 151, 3D Comb 32 × 187 → 32 × 32. Bench prints `leaves | pvs rows |
+  pvs columns`. Not yet in the export (v2 still writes wide rows): a v3 layout with
+  `leafColumn` per leaf is the open step.
 3d. **Hint walls** (`hint_` material/brush): split planes that are never solid.
 3e. **Lossless leaf merging**: after the BSP, merge two empty leaves sharing a portal when
   their union is convex (exact: no vis is lost). Fewer leaves and portals for the flow.
+  **Status: done as option `cluster: "convex"` (2026-11-18), default `"none"`. Not lossless.**
+  `portals/clusters.ts` (`buildLeafClusters`, greedy over portal ids, union-find) merges two
+  clusters when no boundary piece (outgoing portal or wall surface, plane facing out) of one lies
+  in front of a boundary plane of the other, i.e. the union is a convex cell. Base vis, passages and
+  flow run on the cluster graph; `vis/clusterRows.ts` maps the rows back to leaf portals, so
+  `graph`, `mightSee`, `portalVis`, `pvs`, the export and the editors are unchanged
+  (`CompileResult.clusters` gives `leafCluster` and the flow portal count). Findings:
+  - The plan's "exact" was wrong: each leaf gets its cluster's PVS, the union of its leaves' rows.
+    Leaves split by refinement exist to tighten rows, so merging undoes it. Leaf flow is not exact
+    either, so cluster PVS ⊇ leaf PVS does not hold per leaf; only the LOS tests apply.
+  - Portal convexity alone (q3map2 `TryMergeLeaves`) is sound for the flow's no-re-entry rule
+    (`onChain`) but collapses walled corridors into one cluster (Serpentine, Comb: everything
+    visible). Wall surfaces in the test fix that.
+  - `clusterOptions.acrossRefinement` (default false): merging across refinement splits (detected
+    as LCA nodes with only empty leaves below) too. Neither mode dominates: across: 2D Pillar
+    forest flow 1700 ms / Σ pvs 510k, 3D Grid city 253 ms / 67k; without: 4091 ms / 421k and
+    480 ms / 101k (greedy merge order matters).
+
+  Bench (`npm run bench -- --all --cluster`, default mode, single-threaded; Σ mightSee/portalVis
+  columns are over expanded leaf rows, not comparable; baseline = after phase 1):
+
+  | level | portals → flow portals | flow ms | steps | Σ pvs |
+  |---|---|---|---|---|
+  | 2d/Grid city 8×8 | 1504 → 1118 | ~290 → 191 | 84859 → 54175 | 43720 → 88714 |
+  | 2d/Maze 16×16 | 3316 → 2296 | ~215 → 84 | 52424 → 25909 | 33839 → 49775 |
+  | 2d/Pillar forest | 2684 → 2038 | ~7400 → 3739 | 2085171 → 1238072 | 359021 → 421458 |
+  | 2d/Oblique lattice | 1588 → 1344 | ~2400 → 1732 | 888221 → 705005 | 74959 → 91647 |
+  | 3d/Grid city 6×6 | 1886 → 1646 | ~650 → 524 | 147259 → 149971 | 49998 → 101314 |
+  | 3d/Pillar forest | 1120 → 922 | ~2450 → 1807 | 500438 → 397632 | 76099 → 85269 |
+  | 3d/Oblique lattice | 1742 → 1482 | 91530 (trunc) → 75503 (trunc) | 20 M → 20 M | 69876 → 71937 |
+
+  With `--passages` too, 3D Oblique lattice finishes in 8.4 M steps / 41 s (passages alone:
+  12.5 M / 69 s), Σ pvs 71684. Verdict: up to 2× faster flow for +10–100% Σ pvs: a draft-bake
+  speed knob, not a default. Next ideas if pursued: a precision guard (refuse merges whose leaves'
+  base-vis rows differ much), better merge order (largest portal first).
 3f. **Splitter heuristic**: score BSP candidate planes by portals/leaves created (not only
   walls split); sample candidates on big levels to keep the build fast.
+  **Status: done as BSP options (2026-11-18), both off by default.** `scoreSplitters` adds
+  `− facingWeight·onPlane` (fragments on the candidate plane, consumed by the node: Quake's
+  "facing" count); `splitCandidates(frags, maxCandidates)` takes an evenly spaced sample. Both
+  live in the shared scoring, so the parallel build stays identical (tested). Scoring by portal
+  area created was skipped: it needs a region ∩ plane op per candidate per node.
+  Bench (`npm run bench -- --bsp '{"facingWeight":4}'`, single run, timings noisy):
+
+  | level | leaves | portals | flow ms | Σ pvs |
+  |---|---|---|---|---|
+  | 2d/Grid city 8×8 | 755 → 737 | 1504 → 1592 | 333 → 460 | 43720 → 47584 |
+  | 2d/Maze 16×16 | 2104 → 1900 | 3316 → 3292 | 222 → 273 | 33839 → 34494 |
+  | 2d/Pillar forest | 897 → 839 | 2684 → 2548 | 7883 → 8478 | 359021 → 310586 |
+  | 3d/Grid city 6×6 | 854 → 711 | 1886 → 1900 | 670 → 854 | 49998 → 50520 |
+  | 3d/Maze 10×10 | 905 → 584 | 396 → 396 | 16 → 18 | 2683 → 2683 |
+  | 3d/Pillar forest | 469 → 357 | 1120 → 980 | 2735 → 1933 | 76099 → 60806 |
+  | 3d/Serpentine | 151 → 72 | 104 → 104 | 1 → 1 | 383 → 383 |
+
+  Verdict: fewer leaves everywhere (up to 2×, mostly solid/coplanar fragments), but portal count
+  and flow time are mixed (Grid cities worse, 3D Pillar forest −30% flow). Σ pvs is not comparable
+  across different trees (different units). Weight 1 is neutral; 16 ≈ 4. `maxCandidates` (16) saved
+  nothing measurable: the BSP is 2–10% of compile time on these levels; it is for big OBJ levels.
+  Kept opt-in; revisit with a large OBJ (`--obj`).
 
 ## Phase 3.5: editor turnaround
 
@@ -297,11 +399,12 @@ Doors must block vis when closed, without rebaking.
 | 1a sphere reject (base vis done) | S | base vis 2–2.5× |
 | 1b separator cache (done) | M | flow −15–23% 2D, −2–8% 3D |
 | 2a + 2b passages + parallel table (done, option) | M | steps −3–37%, total −7–23% on open levels with threads; 3D Oblique lattice no longer truncates |
-| 3b clusters | M | big on large/OBJ levels |
-| 3c column sharing | S | narrower rows, lossless |
+| 3b PVS clusters (done, option) | M | 2–10× fewer PVS units for ≤ +10% Σ visible (precision guard) |
+| 3f splitter heuristic (done, option) | S | up to 2× fewer leaves; portals/flow mixed |
+| 3c column sharing (done in core; export v3 open) | S | rows 1.2–6× narrower, lossless |
 | 1d allocation-free bitsets, 1e early-out (done) | S | flow −10–17% |
-| 3e lossless leaf merging | S–M | fewer leaves/portals, exact |
+| 3e convex leaf clusters (done, option) | S–M | flow up to 2× faster, Σ pvs +10–100%: draft bakes |
 | 3.5 incremental recompile | L | editor turnaround |
 | 4 runtime clipping | L | runtime culling |
 | 4b occluding doors | M | closed doors hide rooms, no rebake |
-| 1c, 1f, 1g, 3a, 3d, 3f, 5 | S–M | situational, bench-driven |
+| 1c, 1f, 1g, 3a (no-op on leaves), 3d, 5 | S–M | situational, bench-driven |

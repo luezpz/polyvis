@@ -29,9 +29,16 @@ export function numberInput(value: number, onChange: (v: number) => void, min = 
   });
 }
 
-/** A labelled non-negative number field; `title` becomes the tooltip. */
-export function numberField(label: string, value: number, onChange: (v: number) => void, title?: string): HTMLElement {
-  return h("label", { class: "field", ...(title ? { title } : {}) }, h("span", {}, label), numberInput(value, onChange));
+/** A labelled non-negative number field; `title` becomes the tooltip, `step` the input step. */
+export function numberField(label: string, value: number, onChange: (v: number) => void, title?: string, step = 0.5): HTMLElement {
+  return h("label", { class: "field", ...(title ? { title } : {}) }, h("span", {}, label), numberInput(value, onChange, 0, step));
+}
+
+/** A labelled `<select>` over string `values`, calling `onChange(value)`; `title` becomes the tooltip. */
+export function selectField<T extends string>(label: string, values: readonly T[], value: T, onChange: (v: T) => void, title?: string): HTMLElement {
+  const select = h("select", { onchange: (e: Event) => onChange((e.target as HTMLSelectElement).value as T) },
+    ...values.map((v) => h("option", { value: v, selected: v === value }, v)));
+  return h("label", { class: "field", ...(title ? { title } : {}) }, h("span", {}, label), select);
 }
 
 /**

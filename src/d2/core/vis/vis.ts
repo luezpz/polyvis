@@ -10,7 +10,7 @@ import type { PortalGraph } from "../portals";
 
 export {
   type PortalFlowOptions, type PortalFlowResult, type PortalFlowStats, type PvsSymmetry, type PvsTable,
-  BitSet, DEFAULT_PORTAL_FLOW_OPTIONS, buildPvsTable, pvsRowOf,
+  BitSet, DEFAULT_PORTAL_FLOW_OPTIONS, buildPvsTable, pvsRowOf, pvsTableSees,
 } from "../../../shared/core";
 
 /** Base vis rules 1 + 2 for an ordered portal pair. */

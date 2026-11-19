@@ -35,6 +35,13 @@ export interface BspBuildOptions extends RefineOptions {
   readonly balanceWeight: number;
   /** Margin added around the walls' bounding box to close off leaf regions. */
   readonly boundsMargin: number;
+  /**
+   * Phase 3f: score bonus per wall fragment lying on the candidate plane (the node consumes them, so
+   * fewer nodes, leaves and portals follow). 0: off (classic splits + balance score).
+   */
+  readonly facingWeight?: number;
+  /** Phase 3f: score at most this many candidates per node, evenly spaced over them (0 / unset: all). */
+  readonly maxCandidates?: number;
 }
 
 /** A wall piece still to be placed; `plane` indexes the tree's planes (always a wall plane). */
@@ -250,9 +257,14 @@ function internPlane<D extends Dim>(g: Geometry<D>, planes: Plane<D>[], plane: P
   return planes.length - 1;
 }
 
-/** Distinct planes among the fragments, in first-appearance order (the splitter candidates). */
-export function splitCandidates<D extends Dim>(frags: readonly Fragment<D>[]): number[] {
-  return [...new Set(frags.map((f) => f.plane))];
+/**
+ * Distinct planes among the fragments, in first-appearance order (the splitter candidates); with
+ * `maxCandidates` = m < count, the m planes at indices ⌊i·count/m⌋ (deterministic sample).
+ */
+export function splitCandidates<D extends Dim>(frags: readonly Fragment<D>[], maxCandidates = 0): number[] {
+  const all = [...new Set(frags.map((f) => f.plane))];
+  if (!(maxCandidates > 0) || all.length <= maxCandidates) return all;
+  return Array.from({ length: maxCandidates }, (_, i) => all[Math.floor((i * all.length) / maxCandidates)]);
 }
 
 /** Best candidate of a {@link scoreSplitters} call; lower `score` is better. */
@@ -263,20 +275,26 @@ export interface SplitChoice {
 
 /** Scores every distinct plane among the fragments and returns the cheapest. */
 function chooseSplitter<D extends Dim>(g: Geometry<D>, frags: readonly Fragment<D>[], planes: readonly Plane<D>[], opts: BspBuildOptions): number {
-  const candidates = splitCandidates(frags);
+  const candidates = splitCandidates(frags, opts.maxCandidates);
   return candidates.length === 1 ? candidates[0] : scoreSplitters(g, frags, candidates, planes, opts).plane;
 }
 
 /**
  * Scores `candidates` (plane indices, non-empty) against `frags` and returns
- * the first one with the lowest score. Scoring candidate chunks separately and
+ * the first one with the lowest score:
+ *   score = splitWeight·splits + balanceWeight·|front − back| − facingWeight·onPlane,
+ * `onPlane` = fragments with the candidate's plane id (consumed by the node). Scoring candidate chunks separately and
  * keeping the lowest score (ties: earliest chunk) gives the same choice.
  */
 export function scoreSplitters<D extends Dim>(g: Geometry<D>, frags: readonly Fragment<D>[], candidates: readonly number[], planes: readonly Plane<D>[], opts: BspBuildOptions): SplitChoice {
   let best = candidates[0];
   let bestScore = Infinity;
+  const facing = opts.facingWeight ?? 0;
+  const onPlane = new Map<number, number>();
+  if (facing) for (const f of frags) onPlane.set(f.plane, (onPlane.get(f.plane) ?? 0) + 1);
   for (const planeIndex of candidates) {
     const plane = planes[planeIndex];
+    const bonus = facing * (onPlane.get(planeIndex) ?? 0);
     let front = 0, back = 0, splits = 0;
     for (const f of frags) {
       if (f.plane === planeIndex) continue;
@@ -287,9 +305,9 @@ export function scoreSplitters<D extends Dim>(g: Geometry<D>, frags: readonly Fr
         case Side.On: if (g.dot(planes[f.plane].n, plane.n) < 0) back++; break;
       }
       // Early out: this candidate can no longer beat the best one.
-      if (splits * opts.splitWeight >= bestScore) break;
+      if (splits * opts.splitWeight - bonus >= bestScore) break;
     }
-    const score = splits * opts.splitWeight + Math.abs(front - back) * opts.balanceWeight;
+    const score = splits * opts.splitWeight + Math.abs(front - back) * opts.balanceWeight - bonus;
     if (score < bestScore) {
       bestScore = score;
       best = planeIndex;

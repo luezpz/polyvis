@@ -22,6 +22,7 @@ import type { ViewState } from "../editor/viewState";
 import type { Tool } from "../editor/tools/tool";
 import { GlContext, type GpuMesh, LineBuilder, TriangleBuilder } from "./gl";
 import { Overlay } from "./overlay";
+import { PORTAL_KIND_RGB, debugInfo, groupRgb, heatRgb } from "../../../shared/app/render/debugInfo";
 import { BACKGROUND, CSS_COLORS, GL_COLORS, type Rgba, kindRgba, leafRgb } from "./colors";
 
 export interface Probe {
@@ -105,11 +106,11 @@ export class Renderer {
     const probe = scene.probe;
     const rays = result && probe && layers.lineOfSight ? this.lineOfSight(result, probe) : null;
 
-    this.surfaces.update([result, layers.surfaces, layers.pvs, layers.hideCulled, probe?.leaf], () => this.buildSurfaces(result, scene.view, probe));
+    this.surfaces.update([result, layers.surfaces, layers.pvs, layers.hideCulled, layers.clusters, layers.pvsHeat, probe?.leaf], () => this.buildSurfaces(result, scene.view, probe));
     this.lines.update([result, layers.walls, layers.leaves, layers.splitters], () => this.buildLines(result, scene.view));
     this.grid.update([layers.grid, scene.view.workZ, scene.view.gridSize, ...this.gridAnchor(scene.view.gridSize)], () => this.buildGrid(scene.view));
     this.fills.update([result, scene.level, layers.portals, layers.brushes, hovered], () => this.buildFills(result, scene, hovered));
-    this.xray.update([result, scene.level, scene.selectedId, layers.brushes, layers.portals, hovered, rays], () => this.buildXray(result, scene, hovered, rays));
+    this.xray.update([result, scene.level, scene.selectedId, layers.brushes, layers.portals, layers.portalGraph, hovered, rays], () => this.buildXray(result, scene, hovered, rays));
 
     gl.viewport(0, 0, this.canvas.width, this.canvas.height);
     gl.clearColor(...BACKGROUND);
@@ -161,9 +162,13 @@ export class Renderer {
       else if (row && !row.has(leaf)) {
         if (view.layers.hideCulled) return;
         color = GL_COLORS.pvsHidden;
+      } else if (view.layers.pvsHeat) {
+        color = [...heatRgb(debugInfo(result).pvsHeat[leaf]), 1];
       } else {
-        const c = leafRgb(leaf);
-        color = [n[0] * 0.6 + c[0] * 0.4, n[1] * 0.6 + c[1] * 0.4, n[2] * 0.6 + c[2] * 0.4, 1];
+        // Leaf tint, or cluster tint with the clusters layer (all leaves of a cluster alike).
+        const c = view.layers.clusters ? groupRgb(debugInfo(result).leafGroup[leaf]) : leafRgb(leaf);
+        const k = view.layers.clusters ? 0.75 : 0.4;
+        color = [n[0] * (1 - k) + c[0] * k, n[1] * (1 - k) + c[1] * k, n[2] * (1 - k) + c[2] * k, 1];
       }
       for (const s of surfs) tb.polygon(s.winding, result.walls[s.wall].plane.n, color);
     });
@@ -274,6 +279,18 @@ export class Renderer {
           if (!result.portalVis[hovered].has(id)) lb.loop(result.graph.portals[id].winding, GL_COLORS.portalMightSee);
         }
         for (const id of result.portalVis[hovered].toArray()) lb.loop(result.graph.portals[id].winding, GL_COLORS.portalVis);
+      }
+    }
+    if (result && layers.portalGraph) {
+      // Leaf adjacency: leaf centre → portal centre → leaf centre, once per opening, coloured by portal kind.
+      const { portalKind } = debugInfo(result);
+      const center = (leaf: number) => polyhedronCenter(result.tree.leaves[leaf].region!);
+      for (const p of result.graph.portals) {
+        if (p.id > p.twin) continue;
+        const m = windingCenter(p.winding);
+        const c: Rgba = [...PORTAL_KIND_RGB[portalKind[p.id]], 0.85];
+        lb.segment(center(p.from), m, c);
+        lb.segment(m, center(p.to), c);
       }
     }
     if (result?.leaks.leaking) {

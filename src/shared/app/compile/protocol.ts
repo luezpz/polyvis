@@ -7,7 +7,7 @@
  * turns the cloned `{ size, words }` objects back into `BitSet`s.
  */
 
-import { type CompileOptions, type CompileResult, type Dim, BitSet } from "../../core";
+import { type CompileOptions, type CompileResult, type Dim, type PvsTable, BitSet } from "../../core";
 
 export interface CompileRequest<L> {
   readonly id: number;
@@ -26,11 +26,13 @@ const toBitSet = (b: ClonedBitSet): BitSet => new BitSet(b.size, b.words);
 /** Restores class instances lost in a structured clone. Update it when a `CompileResult` gains a class field. */
 export function hydrateResult<D extends Dim>(raw: CompileResult<D>): CompileResult<D> {
   const fix = (rows: readonly unknown[]) => rows.map((r) => toBitSet(r as ClonedBitSet));
+  const fixTable = (t: PvsTable): PvsTable => ({ ...t, rows: fix(t.rows), columnRows: fix(t.columnRows) });
   return {
     ...raw,
     mightSee: fix(raw.mightSee),
     portalVis: fix(raw.portalVis),
     pvs: fix(raw.pvs),
-    pvsTable: { leafRow: raw.pvsTable.leafRow, rows: fix(raw.pvsTable.rows) },
+    pvsTable: fixTable(raw.pvsTable),
+    pvsClusters: raw.pvsClusters && { ...raw.pvsClusters, pvs: fix(raw.pvsClusters.pvs), table: fixTable(raw.pvsClusters.table) },
   };
 }

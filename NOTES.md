@@ -74,9 +74,22 @@ only decisions, gotchas and open items. The 2D/3D merge (former PLAN.md / PROGRE
   The table builds on the worker pool (`rowPool.ts`, cost-based thread count) from packed
   inputs (`packPortalGraph`, `BitSet.packRows`): object-graph clones cost ~10 ms per worker. No
   memory cap (dense: slots × portals bits). Any vis change must keep the `--all` non-timing columns identical
-  unless it is meant to change results. Bench: `npm run bench [-- --all | --only <s> | --obj <file> | --passages | --threads <n> | --repeat <k>]`
+  unless it is meant to change results. Bench: `npm run bench [-- --all | --only <s> | --obj <file> | --passages | --cluster | --pvs-cluster [json] | --bsp <json> | --threads <n> | --repeat <k>]`
   (`--threads` = Node worker threads for the passage table; `--repeat` reports the last, warm run);
   it runs TS through `vite.runnerImport` (no `@types/node`: keep Node APIs in `scripts/bench.mjs`).
+- Phase 3e `cluster: "convex"` (option, default off, lossy): vis runs on convex leaf clusters,
+  rows mapped back to leaf portals (`expandClusterRows`), so results stay per leaf. Clusters must be
+  convex (walls + portals): the flow's `onChain` "no re-entry" rule and precision both need it.
+  Phase 3a is a no-op on leaf graphs (one portal per leaf pair). Details in the plan.
+- Phase 3c: `PvsTable` also carries column sharing (`leafColumn`, `columnRows`, decode with
+  `pvsTableSees`); lossless, always built. Export still v2 (wide rows); TODO v3 with `leafColumn`.
+- Phase 3b `pvsCluster: "wide"` (option, lossy): leaves grouped *after* the flow
+  (`vis/pvsClusters.ts` → `CompileResult.pvsClusters`); `pvs` stays per leaf. Not the same as 3e
+  vis clusters (`cluster`), which change the flow. The `maxGrowth` guard must compare with exact leaf
+  sums, not previous cluster rows (growth compounds otherwise). Not in the export yet.
+- Phase 3f BSP options `facingWeight`, `maxCandidates` (off by default; results mixed). Any splitter
+  change must go through `splitCandidates`/`scoreSplitters` so the parallel BSP stays identical.
+- `Geometry.facetMeasure` (2D length, 3D area) was added for 3b.
 
 ## Gotchas
 - The flow's separator cache (1b) relies on `clipFacet` returning the **same object** when nothing
@@ -86,6 +99,11 @@ only decisions, gotchas and open items. The 2D/3D merge (former PLAN.md / PROGRE
 ## Open TODOs
 - 3D Oblique lattice truncates at the 20 M `maxSteps` budget (bench, single-threaded; ~92 s
   after phase 1, was ~118 s). Fixed with `baseVis: "passages"` (12.5 M steps, ~70 s), still truncates by default.
+- Debug layers portal graph / vis clusters / PVS heatmap read `shared/app/render/debugInfo.ts` (cached per
+  result; portal kind = wall split / refinement / cluster-internal via `refinementPortals`). Checked in headless
+  Chrome by an agent (2D and 3D render).
+- Compile options panel (`shared/app/ui/compileSections.ts`) now exposes every `CompileOptions` field except
+  the pipeline-internal `flow.passages` / `flow.orderBy`; never checked in a browser by an agent.
 - Browser smoke test never done by an agent: `/2d.html` worker compile, select tool
   (click-to-cycle, edge push/pull), surfaces layer; `/3d.html` panel after the shared-UI refactor.
 - Parallel flow and parallel BSP never run in a browser by an agent: confirm nested workers

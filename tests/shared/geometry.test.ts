@@ -68,6 +68,12 @@ describe.each(kernels)("%s geometry kernel", (_, g) => {
     expect(at2 + g.dimension).toBe(data.length);
   });
 
+  it("facetMeasure is length in 2D and area in 3D", () => {
+    // spanning(): 2D segment of length 1, 3D unit square; clipped at x = 0.5 it halves.
+    expect(g.facetMeasure(spanning(g))).toBeCloseTo(1);
+    expect(g.facetMeasure(g.clipFacet(spanning(g), fixtures(g).plane)!)).toBeCloseTo(0.5);
+  });
+
   it("clipFacet keeps the front part, returns unchanged facets as-is, and drops facets on the plane", () => {
     const { plane } = fixtures(g);
     const f = spanning(g);

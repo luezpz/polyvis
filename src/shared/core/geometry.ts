@@ -86,6 +86,8 @@ export interface Geometry<D extends Dim> {
 
   /** Vertices of a facet. */
   facetPoints(facet: Facet<D>): readonly Vec<D>[];
+  /** Size of a facet: 2D segment length, 3D winding area (cluster "wide portal" test). */
+  facetMeasure(facet: Facet<D>): number;
   /** Front / Back / On / Spanning. */
   classifyFacet(plane: Plane<D>, facet: Facet<D>): Side;
   /**

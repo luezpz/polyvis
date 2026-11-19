@@ -9,7 +9,7 @@ import { wallTouchesRegion } from "./bsp/refine";
 import {
   type ConvexPolyhedron, type Vec3, type Winding,
   ZERO, aabbFromPoints, aabbOverlaps, classifyWinding, clipPolyhedron, clipWinding, dot, expandAabb, flipPlane,
-  polyhedronFromAabb, polyhedronVertices, sameOrientedPlane, signedDistance,
+  polyhedronFromAabb, polyhedronVertices, sameOrientedPlane, signedDistance, windingArea,
 } from "./math";
 import { packPolyhedron, packWinding, unpackPolyhedron, unpackWinding } from "./pack";
 import { buildSeparators, clipToPlanes, clipToSeparators } from "./vis/antipenumbra";
@@ -30,6 +30,7 @@ export const geometry3: Geometry<Dim3> = {
   expandBounds: expandAabb,
   boundsOverlap: aabbOverlaps,
   facetPoints: (w) => w,
+  facetMeasure: windingArea,
   classifyFacet: classifyWinding,
   clipFacet: clipWinding,
   cellFromBounds: polyhedronFromAabb,

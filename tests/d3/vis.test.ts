@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   compileLevel, compileWalls, locateLeaf, leafComponents, makeWall, lineOfSight, SAMPLE_LEVELS,
-  exportPvsJson, exportPvsText, decodePvsRow, decodeLeafPvs, pvsRowOf, type Wall, type Level, type CompileOptions, type PvsDocument,
+  exportPvsJson, exportPvsText, decodePvsRow, decodeLeafPvs, pvsRowOf, pvsTableSees, type Wall, type Level, type CompileOptions, type PvsDocument,
 } from "../../src/d3/core";
 import { BitSet } from "../../src/shared/core";
 import { boxLevel, emptyLeaves, randomLevel, randomPointInLeaf, rng } from "./helpers";
@@ -189,6 +189,24 @@ describe("shared PVS rows", () => {
     const r = compileLevel(sample("Zigzag"));
     expect(r.pvsTable.rows.length).toBeLessThan(r.pvs.length);
   });
+
+  it("column sharing decodes back to the original PVS bit for bit, with fewer columns", () => {
+    for (const level of levels()) {
+      const r = compileLevel(level);
+      const t = r.pvsTable;
+      expect(t.leafColumn).toHaveLength(r.pvs.length);
+      expect(t.columnRows).toHaveLength(t.rows.length);
+      const groups = new Set(t.leafColumn).size;
+      t.columnRows.forEach((row) => expect(row.size).toBe(groups));
+      r.pvs.forEach((row, a) => {
+        for (let b = 0; b < r.pvs.length; b++) expect(pvsTableSees(t, a, b)).toBe(row.has(b));
+      });
+      // All solid leaves are never visible, so they share one column.
+      const solidCols = new Set(r.tree.leaves.flatMap((l, i) => (l.contents === "solid" ? [t.leafColumn[i]] : [])));
+      expect(solidCols.size).toBe(1);
+      expect(groups).toBeLessThan(r.pvs.length);
+    }
+  });
 });
 
 describe("export", () => {
@@ -296,5 +314,72 @@ describe("passage vis (2a + 2b)", () => {
       }
     }
     expect(checked).toBeGreaterThan(200);
+  });
+});
+
+describe("vis clusters (3e)", () => {
+  const modes = [{ cluster: "convex" }, { cluster: "convex", clusterOptions: { acrossRefinement: true } }] as const;
+
+  it("is never stricter than true line of sight", () => {
+    const levels = [...SAMPLE_LEVELS.map((s) => s.create()), randomLevel(100, 7), randomLevel(101, 7)];
+    let checked = 0;
+    for (const opts of modes) checked += checkConservative(levels, opts, 300, 5);
+    expect(checked).toBeGreaterThan(500);
+  });
+
+  it("gives every leaf of a cluster the same row, with fewer flow portals", () => {
+    const off = compileLevel(SAMPLE_LEVELS[0].create());
+    expect(off.clusters).toBeNull();
+    for (const opts of modes) {
+      const r = compileLevel(SAMPLE_LEVELS[0].create(), opts);
+      const c = r.clusters!;
+      expect(c.portalCount).toBeLessThan(r.graph.portals.length);
+      for (const a of emptyLeaves(r)) for (const b of emptyLeaves(r)) if (c.leafCluster[a] === c.leafCluster[b]) expect(r.pvs[a].equals(r.pvs[b])).toBe(true);
+    }
+  });
+});
+
+describe("PVS clusters (phase 3b)", () => {
+  const levels = () => [...SAMPLE_LEVELS.map((s) => s.create()), randomLevel(104, 7)];
+
+  it("are conservative: a visible leaf's cluster is visible from the viewer's cluster", () => {
+    for (const level of levels()) {
+      const r = compileLevel(level, { pvsCluster: "wide" });
+      const c = r.pvsClusters!;
+      expect(c.leafCluster).toHaveLength(r.pvs.length);
+      expect(c.pvs).toHaveLength(c.count);
+      r.pvs.forEach((row, a) => {
+        for (const b of row.toArray()) expect(c.pvs[c.leafCluster[a]].has(c.leafCluster[b])).toBe(true);
+      });
+      // The export table decodes back to the cluster rows; the leaf PVS is untouched.
+      c.pvs.forEach((row, k) => expect(pvsRowOf(c.table, k).equals(row)).toBe(true));
+      expect(r.pvs.map((x) => x.toHex())).toEqual(compileLevel(level).pvs.map((x) => x.toHex()));
+    }
+  });
+
+  it("merge leaves, cap cluster size, and keep all solid leaves together", () => {
+    for (const level of levels()) {
+      const r = compileLevel(level, { pvsCluster: "wide", pvsClusterOptions: { maxLeaves: 3 } });
+      const c = r.pvsClusters!;
+      const sizes = new Map<number, number>();
+      r.tree.leaves.forEach((l, i) => { if (l.contents === "empty") sizes.set(c.leafCluster[i], (sizes.get(c.leafCluster[i]) ?? 0) + 1); });
+      for (const s of sizes.values()) expect(s).toBeLessThanOrEqual(3);
+      const solid = new Set(r.tree.leaves.flatMap((l, i) => (l.contents === "empty" ? [] : [c.leafCluster[i]])));
+      expect(solid.size).toBeLessThanOrEqual(1);
+    }
+    const r = compileLevel(levels()[levels().length - 1], { pvsCluster: "wide" });
+    expect(r.pvsClusters!.count).toBeLessThan(r.pvs.length);
+    expect(compileLevel(levels()[0]).pvsClusters).toBeNull();
+  });
+});
+
+describe("splitter heuristic (3f)", () => {
+  it("is never stricter than true line of sight, and facing weight retires coplanar walls (fewer leaves)", () => {
+    const levels = [...SAMPLE_LEVELS.map((s) => s.create()), randomLevel(100, 7), randomLevel(101, 7)];
+    let checked = 0;
+    for (const bsp of [{ facingWeight: 4 }, { maxCandidates: 4 }]) checked += checkConservative(levels, { bsp }, 300, 6);
+    expect(checked).toBeGreaterThan(500);
+    const leaves = (o: object) => levels.reduce((s, l) => s + compileLevel(l, { bsp: o }).tree.leaves.length, 0);
+    expect(leaves({ facingWeight: 4 })).toBeLessThan(leaves({}));
   });
 });

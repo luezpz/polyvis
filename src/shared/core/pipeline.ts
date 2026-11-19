@@ -9,8 +9,8 @@
 
 import { type BspBuildOptions, type BspBuildResult, type BspStats, type BspTree, type LeafSurface, buildBsp, buildLeafSurfaces } from "./bsp";
 import type { Dim, Geometry } from "./geometry";
-import { type LeakReport, type PortalGraph, detectLeaks } from "./portals";
-import { type BitSet, type PassageTable, type PortalFlowOptions, type PortalFlowResult, type PortalFlowStats, type PvsSymmetry, type PvsTable, buildPvsTable, computeBaseVis, computePassages, passageMightSee, computeLeafPvs, computePortalFlow } from "./vis";
+import { type BoundaryPiece, type ClusterOptions, type LeakReport, type PortalGraph, buildLeafClusters, detectLeaks } from "./portals";
+import { type BitSet, type PassageTable, type PortalFlowOptions, type PortalFlowResult, type PortalFlowStats, type PvsSymmetry, type PvsClusterOptions, type PvsClusters, type PvsTable, buildPvsClusters, buildPvsTable, computeBaseVis, computePassages, passageMightSee, computeLeafPvs, computePortalFlow, expandClusterRows } from "./vis";
 import type { Wall } from "./wall";
 
 export interface CompileOptions {
@@ -23,12 +23,39 @@ export interface CompileOptions {
    * every depth). Both conservative.
    */
   readonly baseVis: BaseVisMode;
+  /**
+   * Phase 3e: run base vis, passages and flow on portal-convex leaf clusters (`buildLeafClusters`)
+   * instead of leaves. Fewer, larger units: faster, conservative, rows only grow. `"none"`: off.
+   */
+  readonly cluster: ClusterMode;
+  readonly clusterOptions: Partial<ClusterOptions>;
+  /**
+   * Phase 3b: group leaves into PVS clusters after the flow (`buildPvsClusters`): `pvs` stays per
+   * leaf, `CompileResult.pvsClusters` gets a coarser, conservative cluster PVS. `"none"`: off.
+   */
+  readonly pvsCluster: PvsClusterMode;
+  readonly pvsClusterOptions: Partial<PvsClusterOptions>;
+}
+
+/** See {@link CompileOptions.pvsCluster}. */
+export type PvsClusterMode = "none" | "wide";
+
+/** See {@link CompileOptions.cluster}. */
+export type ClusterMode = "none" | "convex";
+
+/** Summary of the clusters a compile ran its vis on (see {@link CompileOptions.cluster}). */
+export interface ClusterSummary {
+  /** `leafCluster[leaf]` = cluster id. */
+  readonly leafCluster: Int32Array;
+  readonly count: number;
+  /** Directed portals of the cluster graph (the flow's portals). */
+  readonly portalCount: number;
 }
 
 /** See {@link CompileOptions.baseVis}. */
 export type BaseVisMode = "planes" | "passages";
 
-export const DEFAULT_COMPILE_OPTIONS: CompileOptions = Object.freeze({ bsp: {}, flow: {}, symmetry: "none", baseVis: "planes" });
+export const DEFAULT_COMPILE_OPTIONS: CompileOptions = Object.freeze({ bsp: {}, flow: {}, symmetry: "none", baseVis: "planes", cluster: "none", clusterOptions: {}, pvsCluster: "none", pvsClusterOptions: {} });
 
 export interface StageTiming {
   readonly stage: string;
@@ -60,6 +87,8 @@ export interface CompileResult<D extends Dim> {
   readonly surfaces: readonly (readonly LeafSurface<D>[])[];
   readonly graph: PortalGraph<D>;
   readonly leaks: LeakReport;
+  /** Clusters the vis ran on, or null (`cluster: "none"`). Rows below are always per leaf portal. */
+  readonly clusters: ClusterSummary | null;
   /** Base vis: per portal. */
   readonly mightSee: readonly BitSet[];
   /** Flow result: per portal. */
@@ -69,6 +98,8 @@ export interface CompileResult<D extends Dim> {
   readonly pvs: readonly BitSet[];
   /** The same PVS with identical rows shared: `pvs[leaf]` equals `pvsTable.rows[pvsTable.leafRow[leaf]]`. Used by the export. */
   readonly pvsTable: PvsTable;
+  /** PVS clusters (`pvsCluster: "wide"`), or null. */
+  readonly pvsClusters: PvsClusters | null;
   readonly summary: VisSummary;
   readonly timings: readonly StageTiming[];
 }
@@ -123,49 +154,58 @@ export function createCompiler<D extends Dim, L>(config: CompilerConfig<D, L>): 
   const g = config.geometry;
 
   /** Stages up to portals and leaks; `bsp` is the BSP stage's result (built by the caller, timed in `timings`). */
-  const throughPortals = (walls: readonly Wall<D>[], bsp: BspBuildResult<D>, timings: StageTiming[]) => {
+  const throughPortals = (walls: readonly Wall<D>[], bsp: BspBuildResult<D>, opts: CompileOptions, timings: StageTiming[]) => {
     const { tree, stats: bspStats } = bsp;
     const surfaces = timed(timings, "surfaces", () => buildLeafSurfaces(g, tree, walls));
     const graph = timed(timings, "portals", () => config.buildPortalGraph(tree));
     const leaks = timed(timings, "leaks", () => detectLeaks(g, tree, graph));
-    return { walls, tree, bspStats, surfaces, graph, leaks };
+    const vc = opts.cluster === "convex" ? timed(timings, "clusters", () => buildLeafClusters(g, tree, graph, clusterWalls(g, walls, surfaces), opts.clusterOptions)) : null;
+    // `visGraph`: the graph base vis, passages and flow run on (clusters or leaves).
+    return { walls, tree, bspStats, surfaces, graph, leaks, vc, visGraph: vc ? vc.graph : graph };
   };
 
   /** Stages up to base vis, single-threaded. */
-  const throughBaseVis = (walls: readonly Wall<D>[], bsp: BspBuildResult<D>, timings: StageTiming[]) => {
-    const pre = throughPortals(walls, bsp, timings);
-    const base: readonly BitSet[] = timed(timings, "base vis", () => computeBaseVis(g, pre.graph));
+  const throughBaseVis = (walls: readonly Wall<D>[], bsp: BspBuildResult<D>, opts: CompileOptions, timings: StageTiming[]) => {
+    const pre = throughPortals(walls, bsp, opts, timings);
+    const base: readonly BitSet[] = timed(timings, "base vis", () => computeBaseVis(g, pre.visGraph));
     return { ...pre, base };
   };
 
   /** Adds the flow's mightSee (tightened when a passage table is given) to the base-vis stages. */
   const withPassages = (pre: ReturnType<typeof throughBaseVis>, passages: PassageTable | null, timings: StageTiming[]) => {
-    const mightSee = passages ? timed(timings, "passage flood", () => passageMightSee(pre.graph, passages)) : pre.base;
+    const mightSee = passages ? timed(timings, "passage flood", () => passageMightSee(pre.visGraph, passages)) : pre.base;
     return { ...pre, mightSee, passages };
   };
 
   /** Stages up to the flow input, single-threaded. */
   const beforeFlow = (walls: readonly Wall<D>[], bsp: BspBuildResult<D>, opts: CompileOptions, timings: StageTiming[]) => {
-    const pre = throughBaseVis(walls, bsp, timings);
-    const passages = opts.baseVis === "passages" ? timed(timings, "passage vis", () => computePassages(g, pre.graph, pre.base)) : null;
+    const pre = throughBaseVis(walls, bsp, opts, timings);
+    const passages = opts.baseVis === "passages" ? timed(timings, "passage vis", () => computePassages(g, pre.visGraph, pre.base)) : null;
     return withPassages(pre, passages, timings);
   };
 
   /** Stages after portal flow, assembling the result. */
   const afterFlow = (pre: ReturnType<typeof beforeFlow>, flow: PortalFlowResult, opts: CompileOptions, timings: StageTiming[]): CompileResult<D> => {
-    const { passages: _passages, base: _base, ...rest } = pre; // flow-only inputs stay out of the result (size, worker clone)
-    const { tree, graph, mightSee } = pre;
-    const { portalVis, stats: flowStats } = flow;
+    const { passages: _passages, base: _base, vc, visGraph: _visGraph, ...rest } = pre; // flow-only inputs stay out of the result (size, worker clone)
+    const { tree, graph } = pre;
+    const { stats: flowStats } = flow;
+    // Cluster rows back to leaf portals, so everything below (and the result) is per leaf portal.
+    const mightSee = vc ? expandClusterRows(graph, vc, pre.mightSee) : pre.mightSee;
+    const portalVis = vc ? expandClusterRows(graph, vc, flow.portalVis) : flow.portalVis;
+    const clusters = vc ? { leafCluster: vc.leafCluster, count: vc.count, portalCount: vc.graph.portals.length } : null;
     const pvs = timed(timings, "leaf pvs", () => computeLeafPvs(tree, graph, portalVis, opts.symmetry));
     const pvsTable = timed(timings, "pvs rows", () => buildPvsTable(pvs));
-    return { ...rest, detailWalls: [], portalVis, flowStats, pvs, pvsTable, summary: summarize(tree, graph, mightSee, portalVis, pvs), timings };
+    const pvsClusters = opts.pvsCluster === "wide"
+      ? timed(timings, "pvs clusters", () => buildPvsClusters(g, tree, graph, pre.surfaces.map((ss) => ss.map((s) => g.facetMeasure(s.winding))), pvs, opts.pvsClusterOptions))
+      : null;
+    return { ...rest, mightSee, clusters, detailWalls: [], portalVis, flowStats, pvs, pvsTable, pvsClusters, summary: summarize(tree, graph, mightSee, portalVis, pvs), timings };
   };
 
   const compileWalls = (walls: readonly Wall<D>[], options: Partial<CompileOptions> = {}, timings: StageTiming[] = []): CompileResult<D> => {
     const opts: CompileOptions = { ...DEFAULT_COMPILE_OPTIONS, ...options };
     const bsp = timed(timings, "bsp", () => buildBsp(g, walls, bspOptions(opts)));
     const pre = beforeFlow(walls, bsp, opts, timings);
-    const flow = timed(timings, "portal flow", () => computePortalFlow(g, pre.graph, pre.mightSee, flowOptions(opts, pre)));
+    const flow = timed(timings, "portal flow", () => computePortalFlow(g, pre.visGraph, pre.mightSee, flowOptions(opts, pre)));
     return afterFlow(pre, flow, opts, timings);
   };
 
@@ -190,19 +230,19 @@ export function createCompiler<D extends Dim, L>(config: CompilerConfig<D, L>): 
     const tb = performance.now();
     const bsp = runners.bsp ? await runners.bsp(walls, bspOptions(opts)) : buildBsp(g, walls, bspOptions(opts));
     timings.push({ stage: "bsp", ms: performance.now() - tb });
-    const portals = throughPortals(walls, bsp, timings);
+    const portals = throughPortals(walls, bsp, opts, timings);
     const tv = performance.now();
-    const base = { ...portals, base: runners.baseVis ? await runners.baseVis(portals.graph) : computeBaseVis(g, portals.graph) };
+    const base = { ...portals, base: runners.baseVis ? await runners.baseVis(portals.visGraph) : computeBaseVis(g, portals.visGraph) };
     timings.push({ stage: "base vis", ms: performance.now() - tv });
     let passages: PassageTable | null = null;
     if (opts.baseVis === "passages") {
       const tp = performance.now();
-      passages = runners.passages ? await runners.passages(base.graph, base.base) : computePassages(g, base.graph, base.base);
+      passages = runners.passages ? await runners.passages(base.visGraph, base.base) : computePassages(g, base.visGraph, base.base);
       timings.push({ stage: "passage vis", ms: performance.now() - tp });
     }
     const pre = withPassages(base, passages, timings);
     const t0 = performance.now();
-    const flow = await runners.flow(pre.graph, pre.mightSee, flowOptions(opts, pre));
+    const flow = await runners.flow(pre.visGraph, pre.mightSee, flowOptions(opts, pre));
     timings.push({ stage: "portal flow", ms: performance.now() - t0 });
     return { ...afterFlow(pre, flow, opts, timings), detailWalls };
   };
@@ -227,6 +267,11 @@ function summarize<D extends Dim>(tree: BspTree<D>, graph: PortalGraph<D>, might
     averageMightSee: avg(mightSee),
     averagePortalVis: graph.portals.length ? avg(portalVis) : 0,
   };
+}
+
+/** Wall pieces bounding each leaf as cluster boundary pieces (plane flipped to face out of the leaf). */
+function clusterWalls<D extends Dim>(g: Geometry<D>, walls: readonly Wall<D>[], surfaces: readonly (readonly LeafSurface<D>[])[]): BoundaryPiece<D>[][] {
+  return surfaces.map((ss) => ss.map((s) => ({ plane: g.flipPlane(walls[s.wall].plane), winding: s.winding })));
 }
 
 /** Runs `fn`, appending its wall-clock time to `timings` under `stage`. */

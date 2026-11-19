@@ -30,6 +30,7 @@ export const geometry2: Geometry<Dim2> = {
   expandBounds: expandAabb,
   boundsOverlap: aabbOverlaps,
   facetPoints: (s) => [s.a, s.b],
+  facetMeasure: (s) => Math.hypot(s.b.x - s.a.x, s.b.y - s.a.y),
   classifyFacet: classifySegment,
   clipFacet: clipSegmentFront,
   cellFromBounds: (box, tag) => polygonFromAabb(box, [tag, tag, tag, tag]),

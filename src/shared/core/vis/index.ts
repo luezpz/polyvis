@@ -8,3 +8,5 @@ export * from "./parallelFlow";
 export * from "./parallelRows";
 export * from "./parallelPassages";
 export * from "./parallelBaseVis";
+export * from "./clusterRows";
+export * from "./pvsClusters";

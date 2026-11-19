@@ -10,7 +10,7 @@ const walls = (level: Level) => buildWalls(level.brushes);
 
 describe("parallel BSP build", () => {
   it("builds the same tree as the sequential build, for any worker count and options", async () => {
-    const variants: Partial<BspBuildOptions>[] = [{}, { cornerSplits: false, maxCellSize: 0 }, { maxCellSize: 4 }];
+    const variants: Partial<BspBuildOptions>[] = [{}, { cornerSplits: false, maxCellSize: 0 }, { maxCellSize: 4 }, { facingWeight: 4, maxCandidates: 3 }];
     for (const level of levels()) {
       const w = walls(level);
       for (const v of variants) {

@@ -11,6 +11,7 @@ import {
 import type { Camera } from "../editor/camera";
 import type { ViewState } from "../editor/viewState";
 import type { Tool } from "../editor/tools/tool";
+import { type DebugInfo, PORTAL_KIND_RGB, debugInfo, groupRgb, heatRgb, rgbCss } from "../../../shared/app/render/debugInfo";
 import { Painter } from "./painter";
 import { COLORS, kindColors, leafColor } from "./colors";
 
@@ -55,6 +56,8 @@ export class Renderer {
     const result = scene.compiled;
     if (layers.grid) this.drawGrid(scene.view.gridSize);
     if (result && layers.leaves) this.drawLeaves(result);
+    if (result && layers.clusters) this.drawLeafFill(result, (leaf, info) => rgbCss(groupRgb(info.leafGroup[leaf]), 0.4));
+    if (result && layers.pvsHeat) this.drawLeafFill(result, (leaf, info) => rgbCss(heatRgb(info.pvsHeat[leaf]), 0.45));
     if (result && layers.pvs) this.drawPvs(result, scene.view);
     if (result && layers.lineOfSight) this.drawLineOfSight(result, scene.view);
     if (layers.brushes) this.drawBrushes(scene.level, scene.selectedId);
@@ -62,6 +65,7 @@ export class Renderer {
     if (result && layers.walls) this.drawWalls(result);
     if (result && layers.surfaces) this.drawSurfaces(result, scene.view);
     if (result && layers.portals) this.drawPortals(result, scene.view);
+    if (result && layers.portalGraph) this.drawPortalGraph(result);
     if (result && layers.labels) this.drawLabels(result);
     if (result?.leaks.leaking) this.drawLeaks(result);
     if (scene.view.inspect.point && scene.tool.id === "inspect") {
@@ -95,6 +99,28 @@ export class Renderer {
       if (leaf.contents !== "empty" || !leaf.region) return;
       this.painter.polygon(leaf.region.vertices, leafColor(i), { color: COLORS.leafStroke, width: 1 });
     });
+  }
+
+  /** Fills every empty leaf with `color(leaf, info)` (cluster / heat layers). */
+  private drawLeafFill(result: CompileResult, color: (leaf: number, info: DebugInfo) => string): void {
+    const info = debugInfo(result);
+    result.tree.leaves.forEach((leaf, i) => {
+      if (leaf.contents === "empty" && leaf.region) this.painter.polygon(leaf.region.vertices, color(i, info));
+    });
+  }
+
+  /** Leaf adjacency: leaf centre → portal midpoint → leaf centre, once per opening, coloured by portal kind. */
+  private drawPortalGraph(result: CompileResult): void {
+    const { portalKind } = debugInfo(result);
+    const center = (leaf: number) => centroid(result.tree.leaves[leaf].region!.vertices);
+    result.tree.leaves.forEach((leaf, i) => { if (leaf.contents === "empty" && leaf.region) this.painter.dot(center(i), 2.5, COLORS.label); });
+    for (const p of result.graph.portals) {
+      if (p.id > p.twin) continue;
+      const m = midpoint(p.winding.a, p.winding.b);
+      const style = { color: rgbCss(PORTAL_KIND_RGB[portalKind[p.id]], 0.9), width: 1.5 };
+      this.painter.line(center(p.from), m, style);
+      this.painter.line(m, center(p.to), style);
+    }
   }
 
   /** Highlights the probed leaf, its PVS, and dims everything it cannot see. */

@@ -70,9 +70,19 @@ function cases(obj: { path: string; text: string } | null, opts: Partial<Compile
   return out;
 }
 
+/** Phase 3b columns: cluster count, distinct cluster rows, Σ over empty leaves of leaves in visible clusters (comparable to Σ pvs). */
+function clusterCols(r: CompileResult<Dim>): number[] {
+  const c = r.pvsClusters!;
+  const size = new Array<number>(c.count).fill(0);
+  c.leafCluster.forEach((k, l) => { if (r.tree.leaves[l].contents === "empty") size[k]++; });
+  let sum = 0;
+  r.tree.leaves.forEach((l, i) => { if (l.contents === "empty") for (const k of c.pvs[c.leafCluster[i]].toArray()) sum += size[k]; });
+  return [c.count, c.table.rows.length, sum];
+}
+
 /**
  * Entry point. `args`: `--all` (include slow and edge-case levels), `--only <substring>`, `--obj <path>`,
- * `--passages` (phase 2a/2b; "passage ms" = table build + flood), `--threads <n>` (handled by the launcher),
+ * `--passages` (phase 2a/2b; "passage ms" = table build + flood), `--cluster` (phase 3e), `--pvs-cluster [json options]` (phase 3b, e.g. `{"minWidth":0.9}`; adds cluster count, cluster table rows, Σ cluster pvs in leaves), `--bsp <json>` (BSP options, e.g. phase 3f `{"facingWeight":4}`),`--threads <n>` (handled by the launcher),
  * `--repeat <k>` (compile each level k times, report the last: warm JIT in the main thread and threads).
  * `readText(path)` reads the OBJ (passed in by the Node launcher; core code has no file access).
  * `threads`: bench threads for base vis and the passage build, or null (single-threaded).
@@ -82,8 +92,9 @@ export async function main(args: readonly string[], readText: (path: string) => 
   const all = args.includes("--all");
   const only = flag("--only");
   const repeat = Math.max(1, Number(flag("--repeat") ?? 1));
-  const opts: Partial<CompileOptions> = args.includes("--passages") ? { baseVis: "passages" } : {};
-  const header = ["level", "portals", "base vis ms", "passage ms", "Σ mightSee", "flow ms", "steps", "facet clips", "separator clips", "Σ portalVis", "Σ pvs"];
+  const opts: Partial<CompileOptions> = { ...(args.includes("--passages") ? { baseVis: "passages" } : {}), ...(args.includes("--cluster") ? { cluster: "convex" } : {}), ...(args.includes("--pvs-cluster") ? { pvsCluster: "wide", pvsClusterOptions: flag("--pvs-cluster")?.startsWith("{") ? JSON.parse(flag("--pvs-cluster")!) : {} } : {}),
+    ...(flag("--bsp") ? { bsp: JSON.parse(flag("--bsp")!) } : {}) };
+  const header = ["level", "bsp ms", "total ms", "portals", "vis portals", "clusters ms", "base vis ms", "passage ms", "Σ mightSee", "flow ms", "steps", "facet clips", "separator clips", "Σ portalVis", "Σ pvs", "leaves", "pvs rows", "pvs columns", ...(opts.pvsCluster ? ["pvs clusters", "cluster rows", "Σ cluster pvs (leaves)"] : [])];
   console.log(`| ${header.join(" | ")} |\n|${header.map(() => "---").join("|")}|`);
   const objPath = flag("--obj");
   for (const c of cases(objPath ? { path: objPath, text: readText(objPath) } : null, opts, threads)) {
@@ -92,8 +103,8 @@ export async function main(args: readonly string[], readText: (path: string) => 
     let r = await c.compile();
     for (let k = 1; k < repeat; k++) r = await c.compile();
     const f = r.flowStats;
-    const row = [c.name, r.graph.portals.length, ms(r, "base vis").toFixed(0), (ms(r, "passage vis") + ms(r, "passage flood")).toFixed(0), total(r.mightSee), ms(r, "portal flow").toFixed(0),
-      f.steps + (f.truncated ? " (trunc)" : ""), f.facetClips, f.separatorClips, total(r.portalVis), total(r.pvs)];
+    const row = [c.name, ms(r, "bsp").toFixed(0), r.timings.reduce((s, t) => s + t.ms, 0).toFixed(0), r.graph.portals.length, r.clusters?.portalCount ?? r.graph.portals.length, ms(r, "clusters").toFixed(0), ms(r, "base vis").toFixed(0), (ms(r, "passage vis") + ms(r, "passage flood")).toFixed(0), total(r.mightSee), ms(r, "portal flow").toFixed(0),
+      f.steps + (f.truncated ? " (trunc)" : ""), f.facetClips, f.separatorClips, total(r.portalVis), total(r.pvs), r.pvs.length, r.pvsTable.rows.length, r.pvsTable.columnRows[0]?.size ?? 0, ...(r.pvsClusters ? clusterCols(r) : [])];
     console.log(`| ${row.join(" | ")} |`);
   }
 }

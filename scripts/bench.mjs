@@ -1,6 +1,7 @@
 // Launcher: runs scripts/bench.ts through Vite's module runner (TS + extensionless imports).
 // Default: Heavy + Worst case demos of both dimensions, minus 3D Oblique lattice (~110 s).
-// Usage: npm run bench -- [--all] [--only <substring>] [--obj <file.obj>] [--passages] [--threads <n>] [--repeat <k>]
+// Usage: npm run bench -- [--all] [--only <substring>] [--obj <file.obj>] [--passages] [--cluster] [--threads <n>] [--repeat <k>]
+// `--cluster`: vis on convex leaf clusters (phase 3e); "vis portals" = cluster-graph portals.
 // `--threads n`: builds base vis (and, with --passages, the passage table) on n Node worker threads.
 import { readFileSync } from "node:fs";
 import { Worker } from "node:worker_threads";

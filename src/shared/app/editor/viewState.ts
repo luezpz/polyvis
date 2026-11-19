@@ -13,6 +13,9 @@ export interface BaseLayers {
   leaves: boolean;
   splitters: boolean;
   portals: boolean;
+  portalGraph: boolean;
+  clusters: boolean;
+  pvsHeat: boolean;
   labels: boolean;
   pvs: boolean;
   lineOfSight: boolean;
@@ -26,6 +29,9 @@ export const BASE_LAYER_LABELS: Readonly<Record<keyof BaseLayers, string>> = {
   leaves: "BSP leaves",
   splitters: "BSP splitters",
   portals: "Portals",
+  portalGraph: "Portal graph",
+  clusters: "Vis clusters",
+  pvsHeat: "PVS size heatmap",
   labels: "Leaf / portal ids",
   pvs: "PVS of probed leaf",
   lineOfSight: "True line of sight",
