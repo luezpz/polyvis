@@ -3,7 +3,7 @@
 import { describe, expect, it } from "vitest";
 import {
   SAMPLE_LEVELS, compileLevel, lineOfSight, locateLeaf, visibleLeaves, viewToward, viewFrustum, projectRect,
-  leavesInBounds, lightLeaves, anyVisible, packRuntime, runtimePvsRow, type CompileResult,
+  leavesInBounds, lightLeaves, anyVisible, packRuntime, runtimePvsRow, createVisCache, type CompileResult,
 } from "../../src/d3/core";
 import { geometry3 } from "../../src/d3/core/geometry";
 import { emptyLeaves, randomLevel, randomPointInLeaf, rng } from "./helpers";
@@ -183,5 +183,53 @@ describe("subsumption cut (3D)", () => {
         expect(stats.crossings).toBeLessThan(5000);
       }
     }
+  });
+});
+
+describe("coherence cache (3D)", () => {
+  /** Random door flips in place between frames; every cached answer must equal a fresh query (exact reuse). */
+  it("cached visible / light results always equal fresh queries; still cameras and unreached doors hit", () => {
+    const rand = rng(77);
+    for (const level of [randomLevel(7), randomLevel(21)]) {
+      const r = compileLevel(level);
+      const cache = createVisCache(r.graph, r.tree);
+      const open = new Uint8Array(r.graph.portals.length).fill(1);
+      let cam = camera(r, rand), light = camera(r, rand);
+      for (let frame = 0; frame < 60; frame++) {
+        if (rand() < 0.3) cam = camera(r, rand);
+        if (rand() < 0.3) open[Math.floor(rand() * open.length)] ^= 1;
+        if (!cam.eye || !light.eye) { light = camera(r, rand); continue; }
+        for (const clip of modes) {
+          const opts = { clip, view: cam.view, pvsRow: r.pvs[cam.leaf], portalOpen: open };
+          const got = cache.visible(cam.leaf, cam.eye, opts, clip === "planes" ? 0 : 1);
+          expect(got.equals(visibleLeaves(r.graph, cam.leaf, cam.eye, opts))).toBe(true);
+        }
+        const lit = cache.light(0, light.leaf, light.eye, 4, { portalOpen: open });
+        expect(lit).toEqual(lightLeaves(r.tree, r.graph, light.leaf, light.eye, 4, { portalOpen: open }));
+      }
+      expect(cache.stats.hits).toBeGreaterThan(30);
+      expect(cache.stats.misses).toBeGreaterThan(10);
+    }
+  });
+
+  it("a door the light never read does not invalidate it; one it read does", () => {
+    const r = compileLevel(randomLevel(7));
+    const rand = rng(5);
+    const cache = createVisCache(r.graph, r.tree);
+    const open = new Uint8Array(r.graph.portals.length).fill(1);
+    let l = camera(r, rand);
+    while (!l.eye) l = camera(r, rand);
+    const read = new Set<number>();
+    lightLeaves(r.tree, r.graph, l.leaf, l.eye, 4, { portalOpen: open, readPortals: read });
+    const unread = open.findIndex((_, p) => !read.has(p));
+    cache.light(0, l.leaf, l.eye, 4, { portalOpen: open });
+    if (unread >= 0) {
+      open[unread] = 0;
+      cache.light(0, l.leaf, l.eye, 4, { portalOpen: open });
+      expect(cache.stats.hits).toBe(1);
+    }
+    open[[...read][0]] = 0;
+    cache.light(0, l.leaf, l.eye, 4, { portalOpen: open });
+    expect(cache.stats.misses).toBe(2);
   });
 });

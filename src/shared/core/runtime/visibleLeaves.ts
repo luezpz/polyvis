@@ -44,6 +44,11 @@ export interface VisibleLeavesOptions<D extends Dim> {
   readonly portalOpen?: ArrayLike<boolean | number>;
   /** Bench counters (optional, accumulated): `crossings` = portals passed, summed over all paths (blowup check). */
   readonly stats?: { crossings: number };
+  /**
+   * Collector (optional): ids of the portals whose `portalOpen` flag the query read. The result depends
+   * on door state only through these, so a cache can reuse it while none of them changes (`cache.ts`).
+   */
+  readonly readPortals?: Set<number>;
 }
 
 /**
@@ -53,7 +58,7 @@ export interface VisibleLeavesOptions<D extends Dim> {
 export function visibleLeaves<D extends Dim>(
   g: Geometry<D>, graph: PortalGraph<D>, cameraLeaf: number, eye: Vec<D>, opts: VisibleLeavesOptions<D> = {},
 ): BitSet {
-  const { pvsRow = null, portalOpen, view, clip = "planes", stats } = opts;
+  const { pvsRow = null, portalOpen, view, clip = "planes", stats, readPortals } = opts;
   const seen = new BitSet(graph.leafCount);
   const onPath = new Uint8Array(graph.leafCount);
   seen.set(cameraLeaf);
@@ -71,7 +76,12 @@ export function visibleLeaves<D extends Dim>(
   const candidates = function* (leaf: number) {
     for (const pid of graph.portalsFrom[leaf]) {
       const p = graph.portals[pid];
-      if (onPath[p.to] || (portalOpen && !portalOpen[pid]) || (pvsRow && !pvsRow.has(p.to))) continue;
+      if (onPath[p.to]) continue;
+      if (portalOpen) {
+        readPortals?.add(pid);
+        if (!portalOpen[pid]) continue;
+      }
+      if (pvsRow && !pvsRow.has(p.to)) continue;
       // The eye must be behind the portal (normal points into `to`): we look through it, not back.
       if (g.signedDistance(p.plane, eye) >= 0) continue;
       yield p;

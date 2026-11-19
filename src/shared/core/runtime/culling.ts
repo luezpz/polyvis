@@ -48,13 +48,16 @@ export function leavesInBounds<D extends Dim>(g: Geometry<D>, tree: BspTree<D>, 
 /** True if any of `leaves` (an object's registration) is set in `visible`. */
 export const anyVisible = (leaves: readonly number[], visible: BitSet): boolean => leaves.some((l) => visible.has(l));
 
+/** Options of `lightLeaves`: PVS prefilter, door state, and the read-portal collector (see `VisibleLeavesOptions`). */
+export type LightOptions<D extends Dim> = Pick<VisibleLeavesOptions<D>, "pvsRow" | "portalOpen" | "readPortals">;
+
 /**
  * Leaves a point light at `pos` (in leaf `leaf`) can reach: omnidirectional portal clipping from
  * the light, limited to the leaves its `radius` box touches. Closed doors (`portalOpen`) block light.
  */
 export function lightLeaves<D extends Dim>(
   g: Geometry<D>, tree: BspTree<D>, graph: PortalGraph<D>, leaf: number, pos: Vec<D>, radius: number,
-  opts: Pick<VisibleLeavesOptions<D>, "pvsRow" | "portalOpen"> = {},
+  opts: LightOptions<D> = {},
 ): number[] {
   const reach = visibleLeaves(g, graph, leaf, pos, opts);
   const box = g.expandBounds({ min: pos, max: pos }, radius);

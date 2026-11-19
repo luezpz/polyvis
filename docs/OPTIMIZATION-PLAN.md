@@ -464,6 +464,8 @@ Pure TS module `src/shared/core/runtime/` (no DOM; usable in editor preview and 
   Findings: planes cam 8–260 µs; omnidirectional rect is *slower* than omnidirectional planes
   (6 cube views, 2–5× the crossings); through a camera, rect costs about the same as planes but
   keeps more leaves. Rect only pays off where clipping a winding costs more than a box test.
+- Coherence (2026-11-19): `createVisCache` reuses query / light results across frames when exact (same
+  inputs, same flags at the portals read); see "Runtime coherence" under Leftovers.
 - Example (2D Grid city 8×8, leaf centroid, omnidirectional): PVS 46 leaves, rect 13, planes 7.
   3D Grid city 6×6, camera view: PVS 27, rect 15, planes 3.
 
@@ -530,7 +532,7 @@ Doors must block vis when closed, without rebaking.
 | 1d allocation-free bitsets, 1e early-out (done) | S | flow −10–17% |
 | 3e convex leaf clusters (done, option) | S–M | flow up to 2× faster, Σ pvs +10–100%: draft bakes |
 | 3.5 CSG BVH (done), incremental base vis + flow (done in core, `compileSession`) | M | CSG up to 28× faster; closed levels recompile 2× faster after an edit; stable BSP done (below); editor wiring open |
-| 4 runtime clipping (done: planes + rect modes, culling, typed-array + v3 file export, editor layer) | L | runtime culling: e.g. PVS 46 → 7 leaves |
+| 4 runtime clipping (done: planes + rect modes, culling, coherence cache, typed-array + v3 file export, editor layer) | L | runtime culling: e.g. PVS 46 → 7 leaves |
 | 4b occluding doors (done for brushes; OBJ doors open) | M | closed doors hide rooms, no rebake |
 | 3a (no-op on leaves) | S | none on the bench levels |
 
@@ -546,11 +548,21 @@ Doors must block vis when closed, without rebaking.
 | 6a flat base vis (done 2026-11-19, exact) | S | base vis ms: 2D Maze 186 → 16, 2D Pillar forest 151 → 21, 2D Grid city 48 → 25, 3D Pillar forest 44 → 7, 3D Maze 21 → 4; 2D Maze total 298 → 140 |
 | 1f / 6b flat flow (done 2026-11-19, exact) | M | flow ms: 2D Pillar forest 405 → 150, 2D Oblique lattice 190 → 71, 3D Pillar forest 419 → 319, 3D Maze 9 → 11 (noise); totals 2D Pillar forest 579 → 206, 3D 498 → 359 |
 | 6c bench through a bundle (done 2026-11-19) | S | `npm run bench` bundles (Vite/Rolldown SSR build, `scripts/benchBundle.mjs`) then runs it; `--runner` = old path. Counters identical; totals: 3D Maze 101 → 63, 3D Grid city 70 → 42, 2D Oblique lattice 130 → 100 ms (mostly BSP); flow within noise (hot loops already bind imports locally) |
-| 4 runtime coherence (reuse last frame's result inside the same leaf, cache static-light results) | S | cuts worst-case frames (planes cam 8–260 µs per query) |
+| 4 runtime coherence (done 2026-11-19, exact) | S | `createVisCache`: a repeated query / static light hits in ~1.5–3 µs vs 5–120 µs fresh (planes cam, `--runtime` "hit" column); a moving camera misses (see below) |
 | 3d hint walls (`hint_` material in the OBJ) | S–M | tighter PVS and faster flow on open levels, placed in Blender |
 | 1a flow half (sphere test before `clipFacet`) | S | doubtful: step 1 almost never rejects |
 | 1c winding pooling | S | only if the profile shows GC time |
 | 5 WASM/SIMD antipenumbra clip | L | only if 1f shows the arithmetic is the ceiling |
+
+**Runtime coherence (2026-11-19).** `runtime/cache.ts` `createVisCache(graph, tree)` (bound per dimension):
+`visible(leaf, eye, opts, slot)` and `light(id, leaf, pos, radius, opts)` return the previous result iff a fresh
+query would give the same bits. The query is a pure function of (leaf, eye, view, frustum, clip, pvsRow) and of
+`portalOpen` *only at the portals it read*, now collected by the `readPortals` option; an entry keeps its
+inputs by value plus a snapshot of those flags. So a static light stays cached across door toggles its
+traversal never reached. Not done on purpose: reusing a result while the eye moves inside the same leaf (not
+exact: the visible set changes with the eye; a conservative version would need a query from the whole leaf,
+i.e. the PVS row itself). Tests (`tests/d*/runtime.test.ts`): random door flips and camera moves, every cached
+answer equals a fresh query.
 
 **BSP splitter sweep (2026-11-19).** Profile: splitter scoring was 78% of the build (O(candidates ×
 fragments) per node). `bsp/sweep.ts` scores each group of ≥ 4 candidates sharing an exact (or negated)

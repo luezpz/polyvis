@@ -9,7 +9,7 @@ import * as d2 from "../src/d2/core";
 import * as d3 from "../src/d3/core";
 import { geometry2 } from "../src/d2/core/geometry";
 import { geometry3 } from "../src/d3/core/geometry";
-import { type ClipMode, type CompileResult, type Dim, type Geometry, type View, locateLeaf, rng, packRuntime, visibleLeaves } from "../src/shared/core";
+import { type ClipMode, type CompileResult, type Dim, type Geometry, type View, locateLeaf, rng, packRuntime, visibleLeaves, createVisCache } from "../src/shared/core";
 
 /** Eyes sampled per level (each query mode runs once per eye). */
 const EYES = 64;
@@ -30,7 +30,7 @@ const MODES: readonly Mode[] = [
 /** Table header for {@link runtimeRow} (one group of columns per mode). */
 export function runtimeHeader(): string[] {
   return ["level", "compile ms", "leaves", "eyes", "mean pvs (base = flow truncated)", "pack ms",
-    ...MODES.flatMap((m) => [`${m.name} µs`, `${m.name} max µs`, `${m.name} visible`, `${m.name} crossings`, `${m.name} max crossings`])];
+    ...MODES.flatMap((m) => [`${m.name} µs`, `${m.name} max µs`, `${m.name} visible`, `${m.name} crossings`, `${m.name} max crossings`]), "planes cam hit µs"];
 }
 
 /** Random point inside convex cell `cell`: a random convex combination of its vertices. */
@@ -77,6 +77,18 @@ export function runtimeRow(name: string, r: CompileResult<Dim>): (string | numbe
     const n = Math.max(1, eyes.length);
     return [(time / n).toFixed(0), maxTime.toFixed(0), (visible / n).toFixed(1), (crossings / n).toFixed(0), maxCrossings];
   });
+  // Coherence cache (still camera): mean cost of a repeated planes-cam query that hits, door flags supplied.
+  const cache = createVisCache(geo, r.graph, r.tree);
+  const open = new Uint8Array(r.graph.portals.length).fill(1);
+  let hitTime = 0;
+  for (const { leaf, eye, view } of eyes) {
+    const opts = { view, pvsRow: r.pvs[leaf], portalOpen: open };
+    cache.visible(leaf, eye, opts);
+    const s = performance.now();
+    cache.visible(leaf, eye, opts);
+    hitTime += (performance.now() - s) * 1000;
+  }
+  cols.push((hitTime / Math.max(1, eyes.length)).toFixed(1));
   const meanPvs = eyes.reduce((s, e) => s + r.pvs[e.leaf].count(), 0) / Math.max(1, eyes.length);
   return [name, r.timings.reduce((t, x) => t + x.ms, 0).toFixed(0), r.pvs.length, eyes.length, meanPvs.toFixed(1) + (r.flowStats.truncated ? " (base)" : ""), packMs.toFixed(1), ...cols];
 }

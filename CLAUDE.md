@@ -43,7 +43,8 @@ src/shared/core/      dimension-agnostic compiler, generic over D extends Dim
   doors/              occluding doors (phase 4b): door leaf splits, door → portals + sealing, runtime portalOpen
   vis/                BitSet, base vis, clusterRows (cluster rows → leaf portals), passages (canSee table), flatFlow + flatKernel (flow on flat arrays, phase 6b), parallelRows (base vis + passages on workers), portal flow (+ exact parallel dependency scheduler), leaf PVS, shared PVS rows + columns (pvsTable), PVS clusters (pvsClusters, phase 3b), incremental base vis + flow (portalMatch, incrementalBaseVis, incrementalFlow, phase 3.5)
   runtime/            runtime portal clipping (phase 4): visibleLeaves (planes / rect modes), View camera,
-                      object/light culling (leavesInBounds, lightLeaves), packRuntime typed-array export
+                      object/light culling (leavesInBounds, lightLeaves), exact coherence cache
+                      (createVisCache), packRuntime typed-array export
   pipeline.ts         createCompiler(config) → { compileLevel, compileWalls }
   export/pvsRows.ts   decodePvsRow
   gen/maze.ts         seeded RNG + maze generator for demo levels

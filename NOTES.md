@@ -117,6 +117,8 @@ only decisions, gotchas and open items. The 2D/3D merge (former PLAN.md / PROGRE
   rects; omnidirectional = cube map of 6 / 4 views). A leaf is re-entered only with a frustum / rect not
   contained in an earlier one (subsumption cut; without it 3D Pillar forest hung). Bench: `--runtime`
   (flow capped for speed; `--exact-pvs` to disable). Export files are v3 (portal `plane` + `closed`).
+  Coherence: `createVisCache` (`runtime/cache.ts`) reuses a result only when exact (same inputs + same flags at
+  the portals the query read, `readPortals`); cached BitSets / arrays are shared, don't mutate them.
 - Phase 4b doors (`shared/core/doors`): a solid brush with `door: "<name>"` is non-structural like detail
   (baked open). The BSP builder is untouched: after it, `splitLeavesByDoors` splits empty leaves along the
   door planes (a tree → tree pass; door volume normals point *into* the door), so each leaf is wholly in or

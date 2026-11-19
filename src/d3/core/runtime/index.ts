@@ -9,7 +9,7 @@ import type { PortalGraph } from "../portals";
 
 export { portalFrustum3 } from "./portalFrustum";
 export { viewToward } from "./view";
-export type { ClipMode, RuntimeData, ScreenRect } from "../../../shared/core";
+export type { CacheStats, ClipMode, RuntimeData, ScreenRect } from "../../../shared/core";
 export { anyVisible, fullRect, intersectRects, runtimePvsRow, doorPortalOpen, closedDoorPortals } from "../../../shared/core";
 export type { DoorInfo } from "../../../shared/core";
 export type View = shared.View<Dim3>;
@@ -25,7 +25,10 @@ export const projectRect = (eye: Vec3, view: View, points: readonly Vec3[]): Scr
 /** Empty leaves an object's bounding box touches (register once per move). */
 export const leavesInBounds = (tree: BspTree, box: Aabb): number[] => shared.leavesInBounds(geometry3, tree, box);
 /** Leaves a point light reaches (portal clipping from the light, within `radius`). */
-export const lightLeaves = (tree: BspTree, graph: PortalGraph, leaf: number, pos: Vec3, radius: number, opts: Pick<RuntimeOptions, "pvsRow" | "portalOpen"> = {}): number[] =>
+export const lightLeaves = (tree: BspTree, graph: PortalGraph, leaf: number, pos: Vec3, radius: number, opts: Pick<RuntimeOptions, "pvsRow" | "portalOpen" | "readPortals"> = {}): number[] =>
   shared.lightLeaves(geometry3, tree, graph, leaf, pos, radius, opts);
 /** Flat typed-array export for engines (see `shared/core/runtime/pack.ts` for the layout). */
 export const packRuntime = (graph: PortalGraph, pvs: PvsTable, closed: Iterable<number> = []): RuntimeData => shared.packRuntime(geometry3, graph, pvs, closed);
+/** Exact coherence cache over one compile (reuses `visibleLeaves` / `lightLeaves` results while inputs and read doors are unchanged). */
+export type VisCache = shared.VisCache<Dim3>;
+export const createVisCache = (graph: PortalGraph, tree: BspTree): VisCache => shared.createVisCache(geometry3, graph, tree);
