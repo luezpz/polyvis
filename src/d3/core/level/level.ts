@@ -27,6 +27,8 @@ export interface ImportedMesh {
   readonly name: string;
   /** Convex planar polygons, CCW seen from the empty side (front). */
   readonly faces: readonly Winding[];
+  /** Splitter bias per face (phase 3d; OBJ `hint` materials), aligned with `faces`; absent = all 0. */
+  readonly faceSplitBias?: readonly number[];
 }
 
 export interface Level {
@@ -55,7 +57,7 @@ export function serializeLevel(level: Level): string {
     format: level.format,
     version: level.version,
     brushes: level.brushes.map((b) => ({ id: b.id, kind: b.kind, ...(b.detail ? { detail: true } : {}), ...(b.door ? { door: b.door } : {}), ...(b.faceSplitBias ? { faceSplitBias: b.faceSplitBias } : {}), planes: b.planes.map((p) => [p.n.x, p.n.y, p.n.z, p.d]) })), // full precision: rounding planes moves vertices
-    meshes: level.meshes.map((m) => ({ id: m.id, name: m.name, faces: m.faces.map((f) => f.map(p3)) })),
+    meshes: level.meshes.map((m) => ({ id: m.id, name: m.name, faces: m.faces.map((f) => f.map(p3)), ...(m.faceSplitBias ? { faceSplitBias: m.faceSplitBias } : {}) })),
   }, null, 1);
 }
 
@@ -99,16 +101,21 @@ export function parseLevel(json: string): Level {
       const rm = m as Record<string, unknown>;
       if (!Array.isArray(rm.faces)) throw new Error(`Mesh ${i}: faces must be an array`);
       const faces: Winding[] = [];
-      for (const f of rm.faces as unknown[]) {
+      const rawBias = rm.faceSplitBias;
+      if (rawBias !== undefined && !(Array.isArray(rawBias) && rawBias.length === (rm.faces as unknown[]).length && rawBias.every((v) => typeof v === "number" && Number.isFinite(v)))) {
+        throw new Error(`Mesh ${i}: faceSplitBias must be one finite number per face`);
+      }
+      const bias: number[] = [];
+      for (const [fi, f] of (rm.faces as unknown[]).entries()) {
         if (!Array.isArray(f)) throw new Error(`Mesh ${i}: each face must be an array of [x, y, z]`);
         const pts = (f as unknown[]).map((v) => {
           if (!Array.isArray(v) || v.length !== 3 || !v.every((c) => typeof c === "number")) throw new Error(`Mesh ${i}: vertex must be [x, y, z]`);
           return { x: v[0], y: v[1], z: v[2] };
         });
         const w = sanitizeWinding(pts);
-        if (w && windingPlane(w)) faces.push(w);
+        if (w && windingPlane(w)) { faces.push(w); bias.push(rawBias ? (rawBias as number[])[fi] : 0); }
       }
-      meshes.push({ id: typeof rm.id === "number" ? rm.id : i + 1, name: typeof rm.name === "string" ? rm.name : `mesh ${i + 1}`, faces });
+      meshes.push({ id: typeof rm.id === "number" ? rm.id : i + 1, name: typeof rm.name === "string" ? rm.name : `mesh ${i + 1}`, faces, ...(bias.some((b) => b !== 0) ? { faceSplitBias: bias } : {}) });
     }
   }
   return { format: LEVEL_FORMAT, version: LEVEL_VERSION, brushes, meshes };

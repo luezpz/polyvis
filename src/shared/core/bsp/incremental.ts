@@ -34,6 +34,8 @@ interface NodeRange {
   readonly leafEnd: number;
   /** Wall fragments split inside the subtree (its share of `BspStats.splitCount`). */
   readonly splits: number;
+  /** Split ids this node's partition named (key, id), re-registered when the node is copied. */
+  readonly pieceIds: readonly (readonly [string, number])[];
 }
 
 /** What one incremental build leaves for the next; opaque to callers. */
@@ -45,8 +47,13 @@ export interface BspCache<D extends Dim> {
   readonly ranges: readonly NodeRange[];
   /** Node key → node index. */
   readonly byKey: ReadonlyMap<string, number>;
-  /** Exact keys (walls, splits, planes) → session ids; ids stay stable across builds. */
-  readonly ids: Map<string, number>;
+  /**
+   * Exact keys (walls, splits, planes) → session ids, only those the last build used (so a long
+   * session does not grow it); ids stay stable across builds while their key is in use.
+   */
+  readonly ids: ReadonlyMap<string, number>;
+  /** Next fresh id (never reused: a dropped key's id may still sit in an old node key). */
+  readonly nextId: number;
   readonly optionsKey: string;
 }
 
@@ -71,10 +78,12 @@ export function buildBspIncremental<D extends Dim>(g: Geometry<D>, walls: readon
   if (!incrementalBspApplies(opts)) return { result: buildBsp(g, walls, opts), cache: null, reusedNodes: 0 };
   const ctx = prepareBuild(g, walls, opts);
   const optionsKey = JSON.stringify(opts);
-  const ids = cache?.ids ?? new Map<string, number>();
+  const prevIds = cache?.ids ?? new Map<string, number>();
+  const ids = new Map<string, number>(); // keys used by this build
+  let nextId = cache?.nextId ?? 0;
   const idOf = (key: string): number => {
     let id = ids.get(key);
-    if (id === undefined) ids.set(key, (id = ids.size));
+    if (id === undefined) ids.set(key, (id = prevIds.get(key) ?? nextId++));
     return id;
   };
   const packed: number[] = [];
@@ -90,8 +99,12 @@ export function buildBspIncremental<D extends Dim>(g: Geometry<D>, walls: readon
   const biasKey = (p: number): string => (ctx.planeBias && ctx.planeBias[p] !== 0 ? `b${exactKey([ctx.planeBias[p]])};` : "");
   const frags: IdFragment<D>[] = ctx.fragments.map((f) => ({ ...f, id: idOf(`w${planeKeys[f.plane]};${biasKey(f.plane)}${facetKey(f.winding)}`) }));
   let splitPlane = -1; // the plane `piece` splits by (set before each partition)
-  const piece = (parent: IdFragment<D>, winding: Facet<D>, front: boolean): IdFragment<D> =>
-    ({ winding, plane: parent.plane, id: idOf(`s${parent.id}/${planeIds[splitPlane]}${front ? "f" : "b"}`) });
+  let pieceIds: [string, number][] = []; // split ids named by the current partition
+  const piece = (parent: IdFragment<D>, winding: Facet<D>, front: boolean): IdFragment<D> => {
+    const key = `s${parent.id}/${planeIds[splitPlane]}${front ? "f" : "b"}`, id = idOf(key);
+    pieceIds.push([key, id]);
+    return { winding, plane: parent.plane, id };
+  };
 
   const old = cache && cache.optionsKey === optionsKey ? cache : null;
   // Old plane index → new one, by exact numbers (a reused subtree only uses planes of its fragments, which exist now).
@@ -120,7 +133,8 @@ export function buildBspIncremental<D extends Dim>(g: Geometry<D>, walls: readon
     for (let i = at; i < r.nodeEnd; i++) {
       const n = src.nodes[i], q = old!.ranges[i];
       nodes.push({ plane: planeMap[n.plane], front: ref(n.front), back: ref(n.back), region: retag(n.region) });
-      ranges.push({ key: q.key, nodeEnd: q.nodeEnd + nodeShift, leafStart: q.leafStart + leafShift, leafEnd: q.leafEnd + leafShift, splits: q.splits });
+      ranges.push({ ...q, nodeEnd: q.nodeEnd + nodeShift, leafStart: q.leafStart + leafShift, leafEnd: q.leafEnd + leafShift });
+      for (const [key, id] of q.pieceIds) ids.set(key, id); // keep the subtree's split ids alive
       byKey.set(q.key, i + nodeShift);
     }
     for (let i = r.leafStart; i < r.leafEnd; i++) {
@@ -141,7 +155,9 @@ export function buildBspIncremental<D extends Dim>(g: Geometry<D>, walls: readon
     const planeIndex = chooseSplitter(g, fs, ctx);
     const plane = ctx.planes[planeIndex];
     splitPlane = planeIndex;
+    pieceIds = [];
     const part = partitionWith(g, fs, planeIndex, ctx.planes, piece);
+    const myPieceIds = pieceIds;
     const splitsBefore = splitCount;
     splitCount += part.splits;
     const nodeIndex = nodes.length, leafStart = leaves.length;
@@ -153,7 +169,7 @@ export function buildBspIncremental<D extends Dim>(g: Geometry<D>, walls: readon
     const front = part.front.length > 0 ? build(part.front, frontRegion, depth + 1, `${step}f`) : addLeaf("empty", frontRegion, depth + 1);
     const back = part.back.length > 0 ? build(part.back, backRegion, depth + 1, `${step}b`) : addLeaf("solid", backRegion, depth + 1);
     nodes[nodeIndex] = { plane: planeIndex, front, back, region };
-    ranges[nodeIndex] = { key, nodeEnd: nodes.length, leafStart, leafEnd: leaves.length, splits: splitCount - splitsBefore };
+    ranges[nodeIndex] = { key, nodeEnd: nodes.length, leafStart, leafEnd: leaves.length, splits: splitCount - splitsBefore, pieceIds: myPieceIds };
     byKey.set(key, nodeIndex);
     return nodeIndex;
   };
@@ -161,7 +177,7 @@ export function buildBspIncremental<D extends Dim>(g: Geometry<D>, walls: readon
   const boundsKey = exactKey([...g.coords(ctx.bounds.min), ...g.coords(ctx.bounds.max)]);
   const root = frags.length > 0 ? build(frags, ctx.rootRegion, 0, boundsKey) : addLeaf("solid", ctx.rootRegion, 0);
   const tree: BspTree<D> = { planes: ctx.planes, nodes, leaves, root, bounds: ctx.bounds };
-  return { result: treeResult(tree, splitCount, 0), cache: { tree, planeKeys, ranges, byKey, ids, optionsKey }, reusedNodes };
+  return { result: treeResult(tree, splitCount, 0), cache: { tree, planeKeys, ranges, byKey, ids, nextId, optionsKey }, reusedNodes };
 }
 
 /** Numbers joined exactly: shortest round-trip decimals, and −0 kept apart from 0 (`String(-0)` is "0"). */

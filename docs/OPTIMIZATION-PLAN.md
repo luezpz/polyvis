@@ -291,7 +291,7 @@ Left open, bench-driven: 1a flow half (since closed: no payoff), 1c (since close
   10×10 151 × 905 → 151 × 151, 3D Comb 32 × 187 → 32 × 32. Bench prints `leaves | pvs rows |
   pvs columns`. Not yet in the export (it still writes wide rows): a next-version layout with
   `leafColumn` per leaf is the open step.
-3d. **Hint faces: per-face split bias** (reworked 2026-11-19 from "hint walls"; OBJ `hint_` deferred).
+3d. **Hint faces: per-face split bias** (reworked 2026-11-19 from "hint walls"; OBJ `hint` materials done 2026-11-19).
   **Status: done (2026-11-19), both dims, opt-in per face (no bias = same trees).** Instead of extra
   non-solid hint brushes, any brush/room face can carry a splitter bias: `Brush.faceSplitBias[i]`
   (3D: per face / plane; 2D: per edge `vertices[i] → [i+1]`) → CSG copies it to the face's walls as
@@ -303,7 +303,8 @@ Left open, bench-driven: 1a flow half (since closed: no payoff), 1c (since close
   fragments' ids). CSG dedupe keeps the lowest vote of coincident faces. Bias carries across geometry
   edits by matching face normal / edge direction, and is saved in level JSON (`faceSplitBias`). Visibility
   rules are untouched, so the PVS is conservative for any bias (tested). Not done: hints in open space
-  (true Quake hint brushes, need non-solid splitter-only walls), editor UI, OBJ `hint_` material.
+  (true Quake hint brushes, need non-solid splitter-only walls), editor UI. OBJ: material `hint` (bias −1000)
+  or `hint_<n>` → `ImportedMesh.faceSplitBias` → mesh walls (tests in `tests/d3/obj.test.ts`).
   Bench, new demo "Pillar forest (hint rows)" (pillar ±y faces at −1000, i.e. cut along the rows first),
   plain → hinted: 3D portals 578 → 252, Σ mightSee 79736 → 13350, flow 269 → 29 ms, total 314 → 48 ms,
   leaves 300 → 295, Σ pvs 16296 → 3470 (≈ same leaf count, so a real 4.7× tighter PVS), pvs rows 121 → 65;
@@ -455,7 +456,7 @@ Pure TS module `src/shared/core/runtime/` (no DOM; usable in editor preview and 
   touch (BSP query); drawn/lit only if a touched leaf is visible. Lights can also traverse
   from their own leaf to find the leaves they reach (Doom 3 light/area interaction).
 
-**Status (2026-11-20): done** (in `src/shared/core/runtime/`, bound per dimension in `d{2,3}/core/runtime/`).
+**Status (2026-11-19): done** (in `src/shared/core/runtime/`, bound per dimension in `d{2,3}/core/runtime/`).
 - Query `visibleLeaves(graph, cameraLeaf, eye, { clip, view, frustum, pvsRow, portalOpen })`, two modes:
   - `"planes"` (precise, default): each portal winding is clipped to the current frustum, and the next
     frustum is the cone through the *clipped* winding (`Geometry.portalFrustum`), so a frustum stays a
@@ -530,7 +531,10 @@ Doors must block vis when closed, without rebaking.
 - Tests (`tests/d*/doors.test.ts`): leaves wholly in/out of the door, sealing / non-sealing, closed door
   hides the far room while open shows it, PVS conservative w.r.t. ray-tested sight lines, serialization,
   export `closed` flags.
-- Open: OBJ `door_<name>` meshes; door → portal list in the export files.
+- OBJ doors (2026-11-19): objects / groups / materials `door_<name>` → door brushes (`levelFromObj`,
+  `objDoorBrushes`); volume = the mesh's supporting face planes (convex door meshes). Test: an OBJ door
+  seals exactly like the same brush door.
+- Open: door → portal list in the export files (export plan).
 
 ## Phase 5: extras
 
@@ -557,7 +561,7 @@ Doors must block vis when closed, without rebaking.
 | 3e convex leaf clusters (done, option) | S–M | flow up to 2× faster, Σ pvs +10–100%: draft bakes |
 | 3.5 CSG BVH (done), incremental base vis + flow (done in core, `compileSession`) | M | CSG up to 28× faster; closed levels recompile 2× faster after an edit; stable BSP done (below); editor wiring open |
 | 4 runtime clipping (done: planes + rect modes, culling, coherence cache, typed-array + v3 file export, editor layer) | L | runtime culling: e.g. PVS 46 → 7 leaves |
-| 4b occluding doors (done for brushes; OBJ doors open) | M | closed doors hide rooms, no rebake |
+| 4b occluding doors (done: brushes + OBJ `door_<name>`) | M | closed doors hide rooms, no rebake |
 | 3a (no-op on leaves) | S | none on the bench levels |
 
 ### Leftovers (open, in suggested order)
@@ -573,10 +577,10 @@ Doors must block vis when closed, without rebaking.
 | 1f / 6b flat flow (done 2026-11-19, exact) | M | flow ms: 2D Pillar forest 405 → 150, 2D Oblique lattice 190 → 71, 3D Pillar forest 419 → 319, 3D Maze 9 → 11 (noise); totals 2D Pillar forest 579 → 206, 3D 498 → 359 |
 | 6c bench through a bundle (done 2026-11-19) | S | `npm run bench` bundles (Vite/Rolldown SSR build, `scripts/benchBundle.mjs`) then runs it; `--runner` = old path. Counters identical; totals: 3D Maze 101 → 63, 3D Grid city 70 → 42, 2D Oblique lattice 130 → 100 ms (mostly BSP); flow within noise (hot loops already bind imports locally) |
 | 4 runtime coherence (done 2026-11-19, exact) | S | `createVisCache`: a repeated query / static light hits in ~1.5–3 µs vs 5–120 µs fresh (planes cam, `--runtime` "hit" column); a moving camera misses (see below) |
-| 3d hint faces: per-face split bias (done 2026-11-19, opt-in) | S–M | Pillar forest with hinted row faces: 3D total 314 → 48 ms, portals 578 → 252, Σ pvs 4.7× lower at ~same leaves; OBJ `hint_` open |
+| 3d hint faces: per-face split bias (done 2026-11-19, opt-in) | S–M | Pillar forest with hinted row faces: 3D total 314 → 48 ms, portals 578 → 252, Σ pvs 4.7× lower at ~same leaves; OBJ `hint` materials done |
 | 1a flow half (measured 2026-11-19: no payoff, closed) | S | sphere verdict before steps 1–2 clips: identical results, flow ms within noise; reverted |
 | 1c winding pooling (measured 2026-11-19: closed) | S | GC ~55 ms of ~3 s for `bench --all`; 6b arena already pools the flow windings |
-| 5 WASM/SIMD antipenumbra clip | L | only if 1f shows the arithmetic is the ceiling |
+| 5 WASM/SIMD antipenumbra clip (deferred) | L | 1f + 6b done: remaining 3D flow is arithmetic (`separatorPass`, `clipRaw`); only worth it if WASM beats flat JS by a wide margin |
 
 **Runtime coherence (2026-11-19).** `runtime/cache.ts` `createVisCache(graph, tree)` (bound per dimension):
 `visible(leaf, eye, opts, slot)` and `light(id, leaf, pos, radius, opts)` return the previous result iff a fresh
@@ -695,8 +699,10 @@ Part of the base-vis gap is bench-only (module-runner getters, ~15% of `portalMi
 SoA + no dispatch. Plan, in order:
 - **6a base vis (done 2026-11-19)**: `portals/flat.ts` `FlatPortals` + `flatMightSeeRow` in `vis/baseVis.ts` (one
   kernel, dimension branch); bench Σ columns unchanged; `tests/shared/baseVisFlat.test.ts` checks every pair of
-  every level, both kernels. Kept separate from `packPortalGraph` (workers rebuild it; cheap). Open: passages'
-  sphere/plane pre-tests on the same store.
+  every level, both kernels. Kept separate from `packPortalGraph` (workers rebuild it; cheap). Passages too (2026-11-19):
+  `createPassageRows` runs on `FlatPortals` + the flow's flat kernel (`flat = false` = object reference);
+  `tests/shared/passagesFlat.test.ts`: equal tables on every level, both kernels; `bench --passages`
+  counters identical, passage ms 3D Pillar forest 45 → 33, others within noise.
 - **6b flow (done 2026-11-19)**: `vis/flatFlow.ts` (the walk; facets on an arena stack, cached separators on a
   second stack, no per-step allocation) + `Geometry.flatFlow` kernels (`d2|d3/core/vis/flatKernel.ts`, interface
   `vis/flatKernel.ts`). Option `flat` (default true; false = object path, kept as the test reference).

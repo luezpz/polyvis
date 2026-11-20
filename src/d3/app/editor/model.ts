@@ -7,8 +7,8 @@
  */
 
 import {
-  type Brush, type BrushKind, type ImportedMesh, type Level, type Point2, type Vec3,
-  emptyLevel, makeBoxBrush, makeBrush, makePrismBrush, moveBrushFace, nextBrushId, nextMeshId, translateBrush, withDetail, withDoor, withFlags,
+  type Brush, type BrushKind, type Level, type ObjImportResult, type Point2, type Vec3,
+  emptyLevel, makeBoxBrush, makeBrush, objDoorBrushes, objMesh, makePrismBrush, moveBrushFace, nextBrushId, nextMeshId, translateBrush, withDetail, withDoor, withFlags,
 } from "../../core";
 import { History } from "../../../shared/app/editor/history";
 
@@ -154,9 +154,15 @@ export class EditorModel {
     if (copy) this.addBrushObject(withFlags(copy, b));
   }
 
-  addMesh(name: string, faces: ImportedMesh["faces"]): void {
-    const mesh: ImportedMesh = { id: nextMeshId(this._level), name, faces };
-    this.apply({ ...this._level, meshes: [...this._level.meshes, mesh] });
+  /**
+   * Adds an imported OBJ: its mesh (hint biases included) and its `door_<name>` volumes as door
+   * brushes, in one undo step. Returns the door names that gave no volume (skipped).
+   */
+  addObj(name: string, obj: ObjImportResult): string[] {
+    const { brushes, failed } = objDoorBrushes(obj.doors, nextBrushId(this._level));
+    const mesh = objMesh(obj, nextMeshId(this._level), name);
+    this.apply({ ...this._level, brushes: [...this._level.brushes, ...brushes], meshes: [...this._level.meshes, mesh] });
+    return failed;
   }
 
   removeMeshes(): void {

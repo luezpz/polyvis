@@ -161,10 +161,12 @@ export class App implements PanelHost, ToolContext {
     const file = await pickFile(".obj,text/plain");
     if (!file) return;
     try {
-      const { faces, triangleCount, skipped } = importObj(await file.text(), options);
+      const obj = importObj(await file.text(), options);
+      const { faces, faceSplitBias, doors, triangleCount, skipped } = obj;
       if (faces.length === 0) throw new Error("no usable faces found");
-      this.model.addMesh(file.name, faces);
-      console.info(`Imported ${file.name}: ${triangleCount} triangles → ${faces.length} faces (${skipped} skipped)`);
+      const failed = this.model.addObj(file.name, obj);
+      console.info(`Imported ${file.name}: ${triangleCount} triangles → ${faces.length} faces (${skipped} skipped), ${faceSplitBias?.filter((b) => b !== 0).length ?? 0} hint faces, ${doors.length} doors`);
+      if (failed.length) alert(`Door meshes with no closed convex volume (skipped): ${failed.join(", ")}`);
       this.fitView();
     } catch (e) {
       alert(`Could not import OBJ: ${(e as Error).message}`);

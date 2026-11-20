@@ -67,8 +67,8 @@ function cases(obj: { path: string; text: string } | null, opts: Partial<Compile
     ...d3.DEMO_LEVELS.map((s) => ({ name: `3d/${s.name}`, group: s.group, compile: () => c3(s.create()) })),
   ];
   if (obj) {
-    const { faces } = d3.importObj(obj.text);
-    const level: d3.Level = { format: d3.LEVEL_FORMAT, version: d3.LEVEL_VERSION, brushes: [], meshes: [{ id: 1, name: "obj", faces }] };
+    const { level, failed } = d3.levelFromObj(d3.importObj(obj.text));
+    if (failed.length) console.error(`OBJ doors with no volume (skipped): ${failed.join(", ")}`);
     out.push({ name: `3d/obj ${obj.path}`, compile: () => c3(level) });
   }
   return out;

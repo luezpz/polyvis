@@ -13,9 +13,19 @@
  *   2. Triangulate n-gons (ear clipping, so concave Blender n-gons work).
  *   3. Merge coplanar triangles that share an edge back into convex polygons,
  *      so the BSP sees few large faces instead of many triangles.
+ *
+ * Naming conventions (Blender material / object names; a trailing `.001` duplicate suffix is ignored):
+ *   - material `hint` / `hint_<n>`: hint faces (phase 3d), split bias `n` (default {@link OBJ_HINT_BIAS});
+ *     they are ordinary walls that the BSP prefers as splitters.
+ *   - object / group (`o` / `g`) or material `door_<name>`: an occluding door (phase 4b). Its faces are
+ *     not walls; the door volume is the intersection of its supporting face planes (exact for a convex
+ *     mesh, the usual door slab), returned in {@link ObjImportResult.doors}. Faces of one name form one door.
  */
 
-import { type Vec3, type Winding, cross, dot, newellNormal, normalize, planeBasis, sanitizeWinding, sub, KEY_QUANTUM } from "../math";
+import { type Plane3, type Vec3, type Winding, cross, dot, newellNormal, normalize, planeBasis, sanitizeWinding, sub, KEY_QUANTUM, PLANE_EPSILON } from "../math";
+
+/** Split bias of a `hint` material without a number: far below any split count, so hinted planes go first. */
+export const OBJ_HINT_BIAS = -1000;
 
 export interface ObjImportOptions {
   /** Reverse every face (use if the mesh normals point out of the rooms). */
@@ -28,9 +38,19 @@ export interface ObjImportOptions {
 
 export const DEFAULT_OBJ_OPTIONS: ObjImportOptions = Object.freeze({ flipNormals: false, yUp: true, scale: 1 });
 
+/** A door found in an OBJ (`door_<name>`): its volume as outward planes (all door vertices behind each). */
+export interface ObjDoor {
+  readonly name: string;
+  readonly planes: readonly Plane3[];
+}
+
 export interface ObjImportResult {
   /** Convex faces, CCW seen from the empty side. */
   readonly faces: Winding[];
+  /** Split bias per face (`hint` materials), aligned with `faces`; absent when no face has one. */
+  readonly faceSplitBias?: number[];
+  /** Door volumes (`door_<name>` objects / materials), in first-appearance order. */
+  readonly doors: ObjDoor[];
   readonly triangleCount: number;
   /** Faces dropped as degenerate. */
   readonly skipped: number;
@@ -41,10 +61,15 @@ export function importObj(text: string, options: Partial<ObjImportOptions> = {})
   const opts = { ...DEFAULT_OBJ_OPTIONS, ...options };
   const positions: Vec3[] = [];
   const polygons: number[][] = [];
+  const polygonBias: number[] = [];
+  const doorPolys = new Map<string, number[][]>();
+  let material = "", object = "";
 
   for (const rawLine of text.split(/\r?\n/)) {
     const line = rawLine.trim();
-    if (line.startsWith("v ")) {
+    if (line.startsWith("usemtl ")) material = baseName(line.slice(7));
+    else if (line.startsWith("o ") || line.startsWith("g ")) object = baseName(line.slice(2));
+    else if (line.startsWith("v ")) {
       const [x, y, z] = line.slice(2).trim().split(/\s+/).map(Number);
       if (![x, y, z].every(Number.isFinite)) throw new Error(`Bad vertex: ${line}`);
       const s = opts.scale;
@@ -57,7 +82,15 @@ export function importObj(text: string, options: Partial<ObjImportOptions> = {})
         return i > 0 ? i - 1 : positions.length + i;
       });
       if (idx.some((i) => i < 0 || i >= positions.length)) throw new Error(`Face index out of range in: ${line}`);
+      const door = doorName(object) ?? doorName(material);
+      if (door !== null) {
+        const list = doorPolys.get(door) ?? [];
+        if (!doorPolys.has(door)) doorPolys.set(door, list);
+        list.push(idx);
+        continue;
+      }
       polygons.push(opts.flipNormals ? idx.reverse() : idx);
+      polygonBias.push(hintBias(material));
     }
   }
 
@@ -73,21 +106,62 @@ export function importObj(text: string, options: Partial<ObjImportOptions> = {})
 
   let skipped = 0;
   const triangles: number[][] = [];
-  for (const poly of polygons) {
+  const triangleBias: number[] = [];
+  polygons.forEach((poly, pi) => {
     const ids = poly.map((i) => remap[i]).filter((v, k, a) => v !== a[(k + 1) % a.length]);
     const tris = triangulate(ids, positions);
     if (tris.length === 0) skipped++;
-    triangles.push(...tris);
-  }
+    for (const t of tris) { triangles.push(t); triangleBias.push(polygonBias[pi]); }
+  });
 
-  const merged = mergeCoplanar(triangles, positions);
+  const merged = mergeCoplanar(triangles, positions, triangleBias);
   const faces: Winding[] = [];
-  for (const poly of merged) {
-    const w = sanitizeWinding(poly.map((i) => positions[i]));
-    if (w) faces.push(w);
+  const bias: number[] = [];
+  for (const { loop, bias: b } of merged) {
+    const w = sanitizeWinding(loop.map((i) => positions[i]));
+    if (w) { faces.push(w); bias.push(b); }
     else skipped++;
   }
-  return { faces, triangleCount: triangles.length, skipped };
+  const doors = [...doorPolys].map(([name, polys]) => ({ name, planes: supportingPlanes(polys, positions) }));
+  return { faces, ...(bias.some((b) => b !== 0) ? { faceSplitBias: bias } : {}), doors, triangleCount: triangles.length, skipped };
+}
+
+/** An OBJ name without Blender's `.001`-style duplicate suffix. */
+const baseName = (raw: string): string => raw.trim().replace(/\.\d+$/, "");
+
+/** `name` of `door_<name>`, else null. */
+const doorName = (name: string): string | null => (name.startsWith("door_") && name.length > 5 ? name.slice(5) : null);
+
+/** Split bias of a material: `hint` → {@link OBJ_HINT_BIAS}, `hint_<n>` → n (if finite, else the default), else 0. */
+function hintBias(material: string): number {
+  if (material !== "hint" && !material.startsWith("hint_")) return 0;
+  const v = Number(material.slice(5));
+  return material.length > 5 && Number.isFinite(v) && v !== 0 ? v : OBJ_HINT_BIAS;
+}
+
+/**
+ * Door volume of a mesh: the planes of its faces that support it (every vertex of the mesh behind,
+ * within `PLANE_EPSILON`), oriented outward whatever the face winding. For a convex mesh that is all
+ * of them and the intersection is the mesh; a concave mesh yields a smaller (possibly unbounded) volume.
+ */
+function supportingPlanes(polys: readonly number[][], pos: readonly Vec3[]): Plane3[] {
+  const used = [...new Set(polys.flat())].map((i) => pos[i]);
+  const out: Plane3[] = [];
+  for (const poly of polys) {
+    const raw = newellNormal(poly.map((i) => pos[i]));
+    if (raw.x * raw.x + raw.y * raw.y + raw.z * raw.z < 1e-24) continue;
+    let n = normalize(raw), d = dot(n, pos[poly[0]]);
+    let front = 0, back = 0;
+    for (const p of used) {
+      const s = dot(n, p) - d;
+      if (s > PLANE_EPSILON) front++;
+      else if (s < -PLANE_EPSILON) back++;
+    }
+    if (front > 0 && back > 0) continue; // not a supporting plane (concave part)
+    if (front > 0) { n = { x: -n.x, y: -n.y, z: -n.z }; d = -d; }
+    out.push({ n, d });
+  }
+  return out;
 }
 
 /** Ear-clipping triangulation of a planar polygon given by vertex indices. */
@@ -126,20 +200,21 @@ function triangulate(ids: readonly number[], pos: readonly Vec3[]): number[][] {
  * Greedily merges coplanar polygons (vertex-index loops) that share an edge,
  * as long as the union stays convex.
  */
-function mergeCoplanar(polys: readonly number[][], pos: readonly Vec3[]): number[][] {
+function mergeCoplanar(polys: readonly number[][], pos: readonly Vec3[], bias: readonly number[]): { loop: number[]; bias: number }[] {
   const normalOf = (p: readonly number[]) => normalize(newellNormal(p.map((i) => pos[i])));
-  const groups = new Map<string, { normal: Vec3; polys: number[][] }>();
-  for (const p of polys) {
+  // Faces of different split bias never merge (a hint face stays its own face).
+  const groups = new Map<string, { normal: Vec3; bias: number; polys: number[][] }>();
+  polys.forEach((p, pi) => {
     const n = normalOf(p);
     const d = dot(n, pos[p[0]]);
-    const key = `${Math.round(n.x * 1e4)},${Math.round(n.y * 1e4)},${Math.round(n.z * 1e4)},${Math.round(d * 1e3)}`;
+    const key = `${Math.round(n.x * 1e4)},${Math.round(n.y * 1e4)},${Math.round(n.z * 1e4)},${Math.round(d * 1e3)}|${bias[pi]}`;
     const g = groups.get(key);
     if (g) g.polys.push([...p]);
-    else groups.set(key, { normal: n, polys: [[...p]] });
-  }
+    else groups.set(key, { normal: n, bias: bias[pi], polys: [[...p]] });
+  });
 
-  const out: number[][] = [];
-  for (const { normal, polys: group } of groups.values()) {
+  const out: { loop: number[]; bias: number }[] = [];
+  for (const { normal, bias: b, polys: group } of groups.values()) {
     let changed = true;
     while (changed) {
       changed = false;
@@ -160,7 +235,7 @@ function mergeCoplanar(polys: readonly number[][], pos: readonly Vec3[]): number
         }
       }
     }
-    out.push(...group);
+    for (const loop of group) out.push({ loop, bias: b });
   }
   return out;
 }

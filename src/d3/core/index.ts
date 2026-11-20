@@ -14,4 +14,5 @@ export * from "./pipeline";
 export * from "./runtime";
 export * from "./export/pvsExport";
 export * from "./import/obj";
+export * from "./import/objLevel";
 export * from "./analysis/visibility";

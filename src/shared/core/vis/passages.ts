@@ -16,7 +16,7 @@
 
 import type { Dim, Facet, Geometry, Plane } from "../geometry";
 import { PLANE_EPSILON } from "../math";
-import type { PortalGraph } from "../portals";
+import { type PortalGraph, flattenPortals } from "../portals";
 import { portalSpheres } from "./baseVis";
 import { BitSet } from "./bitset";
 
@@ -50,7 +50,8 @@ export function computePassages<D extends Dim>(g: Geometry<D>, graph: PortalGrap
  * canSee rows of portals `[p0, p1)`, i.e. table slots `[slot[p0], slot[p1])` (fresh array, words
  * relative to `slot[p0]`). Ranges are independent, so workers can build them in parallel.
  */
-export function createPassageRows<D extends Dim>(g: Geometry<D>, graph: PortalGraph<D>, mightSee: readonly BitSet[], slot: Int32Array): (p0: number, p1: number) => Uint32Array {
+export function createPassageRows<D extends Dim>(g: Geometry<D>, graph: PortalGraph<D>, mightSee: readonly BitSet[], slot: Int32Array, flat = true): (p0: number, p1: number) => Uint32Array {
+  if (flat) return createPassageRowsFlat(g, graph, mightSee, slot);
   const { portals, portalsFrom } = graph;
   const n = portals.length, wordsPerRow = (n + 31) >>> 5;
   const { center, radius } = portalSpheres(g, graph);
@@ -89,6 +90,97 @@ export function createPassageRows<D extends Dim>(g: Geometry<D>, graph: PortalGr
             seps ??= g.separators(src, pass);
             for (let i = 0; i < seps.length && kf; i++) kf = clipK(kf, k, seps[i]);
             if (kf) words[base + w] |= 1 << (k & 31);
+          }
+        }
+      }
+    }
+    return words;
+  };
+}
+
+/**
+ * Phase 6a leftover: {@link createPassageRows} on {@link FlatPortals} and the flow's flat kernel
+ * (`Geometry.flatFlow`). Same table bit for bit: the kernel ops equal the object ops, and the sphere
+ * pre-test is exact either way (it only skips clips whose result it already knows).
+ */
+function createPassageRowsFlat<D extends Dim>(g: Geometry<D>, graph: PortalGraph<D>, mightSee: readonly BitSet[], slot: Int32Array): (p0: number, p1: number) => Uint32Array {
+  const { portals, portalsFrom } = graph;
+  const n = portals.length, wordsPerRow = (n + 31) >>> 5;
+  const { center, radius } = portalSpheres(g, graph);
+  const fp = flattenPortals(g, graph, center, radius);
+  const { clip, separators } = g.flatFlow;
+  const k = fp.dimension, pk = k + 1, eps = PLANE_EPSILON;
+  const { plane: PL, coords: XC, vertexStart: VS, center: C, radius: R } = fp;
+  let maxN = 0;
+  for (let i = 0; i < n; i++) maxN = Math.max(maxN, VS[i + 1] - VS[i]);
+  const maxSeps = 2 * (maxN + 1) * (maxN + 1);
+  // k clipped to the front of p's plane, per p: `kn[k]` = −1 unknown, 0 gone, else its vertex count
+  // at `KA[ko[k] ..]` (or the portal itself at XC when `kSame[k]`).
+  const kn = new Int32Array(n), ko = new Int32Array(n), kSame = new Uint8Array(n);
+  let KA = new Float64Array(1024), kTop = 0;
+  const srcB = new Float64Array((maxN + 1) * k), passB = new Float64Array((maxN + 1) * k);
+  const S = new Float64Array(maxSeps * pk);
+  // Ping-pong buffers of one separator chain (each clip adds at most one vertex).
+  const ping = [new Float64Array((maxN + maxSeps + 2) * k), new Float64Array((maxN + maxSeps + 2) * k)];
+
+  /** Signed distance of portal q's sphere centre from plane (P, po). */
+  const centreDist = (P: Float64Array, po: number, q: number): number => {
+    let s = -P[po + k];
+    for (let c = 0; c < k; c++) s += P[po + c] * C[q * k + c];
+    return s;
+  };
+
+  return (p0, p1) => {
+    const words = new Uint32Array((slot[p1] - slot[p0]) * wordsPerRow);
+    for (let p = p0; p < p1; p++) {
+      const P = portals[p], mw = mightSee[p].words, out = portalsFrom[P.to], ppo = p * pk;
+      kn.fill(-1);
+      kTop = 0;
+      for (let j = 0; j < out.length; j++) {
+        const t = out[j];
+        if (!mightSee[p].has(t)) continue;
+        // src = p behind t, pass = t in front of p.
+        let sA = XC, so = VS[p] * k, sn = VS[p + 1] - VS[p];
+        let m = clip(XC, so, sn, PL, t * pk, -1, srcB, 0);
+        if (m === 0) continue;
+        if (m > 0) { sA = srcB; so = 0; sn = m; }
+        let tA = XC, to = VS[t] * k, tn = VS[t + 1] - VS[t];
+        m = clip(XC, to, tn, PL, ppo, 1, passB, 0);
+        if (m === 0) continue;
+        if (m > 0) { tA = passB; to = 0; tn = m; }
+        const base = (slot[p] - slot[p0] + j) * wordsPerRow, tw = mightSee[t].words;
+        words[base + (t >>> 5)] |= 1 << (t & 31);
+        let nSeps = -1;
+        for (let w = 0; w < wordsPerRow; w++) {
+          for (let bits = mw[w] & tw[w]; bits !== 0; bits &= bits - 1) {
+            const q = (w << 5) | (31 - Math.clz32(bits & -bits));
+            const r = R[q];
+            if (kn[q] < 0) {
+              // k' = q clipped to the front of p's plane, sphere-tested first.
+              const d = centreDist(PL, ppo, q), qn = VS[q + 1] - VS[q];
+              if (d + r <= eps) kn[q] = 0;
+              else if (d - r > eps) { kn[q] = qn; kSame[q] = 1; }
+              else {
+                if (kTop + (qn + 1) * k > KA.length) { const next = new Float64Array(2 * KA.length + (qn + 1) * k); next.set(KA.subarray(0, kTop)); KA = next; }
+                const mm = clip(XC, VS[q] * k, qn, PL, ppo, 1, KA, kTop);
+                if (mm < 0) { kn[q] = qn; kSame[q] = 1; }
+                else { kn[q] = mm; kSame[q] = 0; ko[q] = kTop; kTop += mm * k; }
+              }
+            }
+            let cn = kn[q];
+            if (cn === 0) continue;
+            let cA = kSame[q] ? XC : KA, co = kSame[q] ? VS[q] * k : ko[q], buf = 0;
+            if (nSeps < 0) nSeps = separators(sA, so, sn, tA, to, tn, S, 0);
+            for (let i = 0; i < nSeps && cn > 0; i++) {
+              const d = centreDist(S, i * pk, q);
+              if (d + r <= eps) { cn = 0; break; }
+              if (d - r > eps) continue;
+              const O = ping[buf];
+              const mm = clip(cA, co, cn, S, i * pk, 1, O, 0);
+              if (mm === 0) cn = 0;
+              else if (mm > 0) { cA = O; co = 0; cn = mm; buf ^= 1; }
+            }
+            if (cn > 0) words[base + w] |= 1 << (q & 31);
           }
         }
       }

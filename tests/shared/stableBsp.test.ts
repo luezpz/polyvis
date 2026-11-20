@@ -96,6 +96,20 @@ describe("stable BSP", () => {
     }
   });
 
+  it("session ids stay bounded over many distinct edits, and reuse survives the pruning", () => {
+    const level = d3.ALL_LEVELS.find((l) => l.name === "Maze 10×10")!, brushes = level.create().brushes;
+    const at = editable(brushes)[0], g = geometry3, opts = d3.DEFAULT_BSP_OPTIONS;
+    const walls = (by: number) => d3.buildWalls(brushes.map((b, k) => (k === at ? (d3.moveBrushFace(b, 0, by) ?? b) : b)));
+    let cache = buildBspIncremental(g, walls(0), opts, null).cache!;
+    const size0 = cache.ids.size;
+    // Every edit names new walls / splits; only keys the last build used may stay.
+    for (let i = 1; i <= 20; i++) cache = buildBspIncremental(g, walls(0.05 * i), opts, cache).cache!;
+    expect(cache.ids.size).toBeLessThanOrEqual(size0 + 10); // was +133 before pruning
+    const back = buildBspIncremental(g, walls(0), opts, cache);
+    expect(back.result).toEqual(buildBsp(g, walls(0), opts));
+    expect(back.reusedNodes / back.result.tree.nodes.length).toBeGreaterThan(0.5);
+  });
+
   it("refinement falls back to a plain build", () => {
     const { g, opts, versions } = cases[0];
     const o = { ...opts, cornerSplits: true };

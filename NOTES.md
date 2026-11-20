@@ -123,12 +123,15 @@ only decisions, gotchas and open items. The 2D/3D merge (former PLAN.md / PROGRE
   (baked open). The BSP builder is untouched: after it, `splitLeavesByDoors` splits empty leaves along the
   door planes (a tree → tree pass; door volume normals point *into* the door), so each leaf is wholly in or
   out; `findDoors` → `CompileResult.doors` (leaves, boundary portals, `seals` by flood). Runtime:
-  `doorPortalOpen` / `closedDoorPortals`. Door faces show up in `detailWalls`. Parity gap: OBJ meshes
-  can't be doors yet (`door_<name>` naming from the plan is open; brushes only, both dims).
+  `doorPortalOpen` / `closedDoorPortals`. Door faces show up in `detailWalls`. OBJ (3D only): objects /
+  groups / materials named `door_<name>` become door brushes (`import/objLevel.ts`); volume = the mesh's
+  supporting face planes, so a door mesh must be convex (a slab); one with no bounded volume is skipped and reported.
 - Phase 3d hint faces = per-face splitter bias (`Brush.faceSplitBias` → `Wall.splitBias` → `BuildContext.planeBias`
   → `splitterScore`), not extra hint brushes. A plane takes the lowest nonzero vote of its walls. Builder specs
   give it in face order (3D box −x, +x, −y, +y, −z, +z; 2D box −y, +x, +y, −x); edits carry it by normal. No
-  editor UI and no OBJ `hint_` yet (deferred).
+  editor UI. OBJ (3D only): material `hint` (bias `OBJ_HINT_BIAS` = −1000) or `hint_<n>` (bias n) →
+  `ImportedMesh.faceSplitBias` → mesh walls; hint faces never merge with plain coplanar faces on import.
+  Blender's `.001` name suffixes are ignored for both `hint` and `door_`.
 - No PAS (decided 2026-11-19): it is a bake-time artifact (can't be rebuilt on map load) and adds little.
   Engines do sound on the portal graph instead (flood from the source leaf), using door portals
   (`DoorInfo.portals`) to attenuate or stop sound.
@@ -155,6 +158,8 @@ only decisions, gotchas and open items. The 2D/3D merge (former PLAN.md / PROGRE
 
 ## Open TODOs
 - Phase 3.5 paused (editor is low priority): wire `compileSession` into the compile worker.
+  (`BspCache.ids` is pruned to the last build's keys, so long sessions don't leak; ids come from
+  `nextId`, never reused, and a copied subtree re-registers its split ids from `NodeRange.pieceIds`.)
 - 3D Oblique lattice truncates at the 20 M `maxSteps` budget (bench, single-threaded; ~92 s
   after phase 1, was ~118 s). Fixed with `baseVis: "passages"` (12.5 M steps, ~70 s), still truncates by default.
 - Debug layers portal graph / vis clusters / PVS heatmap read `shared/app/render/debugInfo.ts` (cached per
@@ -168,9 +173,8 @@ only decisions, gotchas and open items. The 2D/3D merge (former PLAN.md / PROGRE
   start, and measure the speed-up on a big 3D level (console.debug logs ready-source counts);
   tune `MAX_BATCH` / `MIN_PARALLEL_PORTALS` / `MIN_PARALLEL_WALLS` / `MAX_BSP_THREADS`.
 - Parallel base vis never run in a browser: confirm the speed-up there (Node numbers in Decisions).
-- Doors: OBJ `door_<name>` meshes (need a convex volume per mesh); door state in the export beyond the
-  `closed` flag (door → portal list).
-- Hint faces: OBJ `hint_` material → `splitBias`; editor UI to set a face's bias; hints in open space
+- Doors: door state in the export beyond the `closed` flag (door → portal list; export plan).
+- Hint faces: editor UI to set a face's bias; hints in open space
   (non-solid splitter-only walls) if a level needs a cut no face lies on.
 - Open decision: merge the two editor shells (panel/app) further, or keep sharing helpers only.
 - Convex hulls generation (for physics engines, navmesh, etc.)
