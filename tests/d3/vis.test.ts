@@ -154,6 +154,19 @@ describe("PVS", () => {
     });
   });
 
+  it("symmetry modes match their per-pair definition (a sees b and/or b sees a)", () => {
+    const level = SAMPLE_LEVELS[0].create();
+    const none = compileLevel(level, { symmetry: "none" }).pvs;
+    const inter = compileLevel(level, { symmetry: "intersect" }).pvs;
+    const union = compileLevel(level, { symmetry: "union" }).pvs;
+    for (let a = 0; a < none.length; a++) {
+      for (let b = 0; b < none.length; b++) {
+        expect(inter[a].has(b)).toBe(none[a].has(b) && none[b].has(a));
+        expect(union[a].has(b)).toBe(none[a].has(b) || none[b].has(a));
+      }
+    }
+  });
+
   it("flow is at least as tight as base vis, and strictly tighter somewhere", () => {
     const r = compileLevel(SAMPLE_LEVELS[0].create());
     r.portalVis.forEach((v, i) => expect(v.hasAnyNotIn(r.mightSee[i])).toBe(false));

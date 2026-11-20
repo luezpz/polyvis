@@ -30,7 +30,7 @@ import {
   type Vec2, type Segment,
   addScaled, distance, distanceSq, lerp, midpoint, normalize, perpLeft, sub, dot,
   segmentIntersection, projectParam, distanceToSegmentLine, convexContains, lineFromPoints,
-  KEY_QUANTUM, MIN_LENGTH, MIN_LENGTH_SQ, PLANE_EPSILON, PROBE_OFFSET,
+  KEY_QUANTUM, MIN_LENGTH, MIN_LENGTH_SQ, NORMAL_EPSILON, PLANE_EPSILON, PROBE_OFFSET,
 } from "../math";
 import { type Bvh, type Wall as SharedWall, bvhAnyAt, bvhQueryBox, buildBvh } from "../../../shared/core";
 import type { Dim2 } from "../geometry";
@@ -184,7 +184,7 @@ function mergeCollinear(walls: readonly Wall[]): Wall[] {
     push(byEnd, pointKey(w.winding.b), i);
   });
   const used = new Uint8Array(walls.length);
-  const collinear = (i: number, j: number) => dot(walls[i].plane.n, walls[j].plane.n) > 1 - 1e-9;
+  const collinear = (i: number, j: number) => dot(walls[i].plane.n, walls[j].plane.n) > 1 - NORMAL_EPSILON;
 
   const out: Wall[] = [];
   for (let i = 0; i < walls.length; i++) {

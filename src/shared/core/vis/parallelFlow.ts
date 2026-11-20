@@ -15,7 +15,10 @@
  * serial (still correct).
  *
  * Exactness holds unless `maxSteps` is hit: the budget is checked at dispatch,
- * so which sources fall back to base vis then depends on timing.
+ * so which sources fall back to base vis then depends on timing. Each in-flight
+ * batch gets the whole remaining budget, so the run can overshoot `maxSteps` by
+ * up to (workers − 1) × the remaining budget at dispatch; it is a safety valve,
+ * not an exact cap (splitting it would truncate sources a serial run finishes).
  *
  * Workers are abstract ({@link FlowWorker}) so this stays a pure library: the
  * app backs them with Web Workers, tests with {@link inProcessFlowWorker}.
@@ -210,7 +213,7 @@ export async function computePortalFlowParallel<D extends Dim>(graph: PortalGrap
         const has = sent[wi];
         const known: FlowRow[] = [];
         for (const id of batch) collectDeps(id, has, known);
-        const budget = opts.maxSteps > 0 ? opts.maxSteps - stats.steps : Infinity;
+        const budget = opts.maxSteps > 0 ? opts.maxSteps - stats.steps : Infinity; // whole remainder per batch: may overshoot (see header)
         workers[wi].flow(known, batch, budget).then((results) => {
           for (const r of results) complete(r);
           idle.push(wi);

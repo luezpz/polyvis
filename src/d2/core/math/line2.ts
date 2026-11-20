@@ -9,7 +9,7 @@
  */
 
 import { type Vec2, dot, normalize, perpLeft, sub, neg } from "./vec2";
-import { PLANE_EPSILON, Side } from "../../../shared/core/math";
+import { NORMAL_EPSILON, PLANE_EPSILON, Side } from "../../../shared/core/math";
 
 export interface Line2 {
   /** Unit normal. Points into the front half-space. */
@@ -65,7 +65,7 @@ export function classifyPoints(l: Line2, points: readonly Vec2[], eps = PLANE_EP
 /** True if two lines are the same geometric line (orientation ignored). */
 export function sameLine(a: Line2, b: Line2, eps = PLANE_EPSILON): boolean {
   const k = dot(a.n, b.n);
-  if (Math.abs(Math.abs(k) - 1) > 1e-9 + eps) return false;
+  if (Math.abs(Math.abs(k) - 1) > NORMAL_EPSILON + eps) return false;
   return Math.abs(a.d - Math.sign(k) * b.d) <= eps;
 }
 

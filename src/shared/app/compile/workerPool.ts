@@ -64,19 +64,36 @@ export class WorkerPool {
   /** One call per worker, or null if parallel stages should run single-threaded instead. */
   workers(): PoolCall[] | null {
     if (this.broken || this.threads < 2) return null;
-    this.calls ??= Array.from({ length: this.threads }, () => {
-      const { call, kill } = workerCall(this.createWorker());
-      this.kills.push(kill);
-      return call;
-    });
+    if (!this.calls) {
+      try {
+        this.calls = Array.from({ length: this.threads }, () => {
+          const { call, kill } = workerCall(this.createWorker());
+          this.kills.push(kill);
+          return call;
+        });
+      } catch (e) {
+        // `new Worker` can throw (no nested workers, CSP): drop the partial set, run single-threaded from now on.
+        console.warn("Pool workers unavailable, using one thread", e);
+        this.markBroken();
+        return null;
+      }
+    }
     return this.calls;
+  }
+
+  /**
+   * Terminates the workers but keeps the pool enabled; the next {@link workers} call spawns fresh ones.
+   * Used after a stage error so threads still busy with the failed stage don't delay later stages.
+   */
+  recycle(): void {
+    for (const kill of this.kills) kill();
+    this.kills = [];
+    this.calls = null;
   }
 
   /** Disables the pool after a failure (e.g. no nested-worker support) and terminates its workers; stages fall back to one thread. */
   markBroken(): void {
     this.broken = true;
-    for (const kill of this.kills) kill();
-    this.kills = [];
-    this.calls = null;
+    this.recycle();
   }
 }

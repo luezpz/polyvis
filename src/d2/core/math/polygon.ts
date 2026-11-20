@@ -13,7 +13,7 @@
 
 import { type Vec2, cross, distanceSq, lerp, sub } from "./vec2";
 import { type Line2, flipLine, signedDistance } from "./line2";
-import { MIN_AREA, MIN_LENGTH_SQ, PLANE_EPSILON } from "../../../shared/core/math";
+import { MIN_AREA, MIN_LENGTH_SQ, PARALLEL_EPSILON, PLANE_EPSILON } from "../../../shared/core/math";
 import type { Aabb } from "./aabb";
 
 /** Tag used for edges that do not originate from any known line. */
@@ -64,7 +64,7 @@ export function centroid(vertices: readonly Vec2[]): Vec2 {
     cx += (p.x + q.x) * w;
     cy += (p.y + q.y) * w;
   }
-  if (Math.abs(a) < 1e-12) {
+  if (Math.abs(a) < PARALLEL_EPSILON) {
     let sx = 0, sy = 0;
     for (const p of vertices) { sx += p.x; sy += p.y; }
     return { x: sx / Math.max(1, n), y: sy / Math.max(1, n) };
@@ -149,7 +149,7 @@ export function convexHull(points: readonly Vec2[]): Vec2[] {
   const chain = (src: readonly Vec2[]): Vec2[] => {
     const h: Vec2[] = [];
     for (const p of src) {
-      while (h.length >= 2 && cross(sub(h[h.length - 1], h[h.length - 2]), sub(p, h[h.length - 2])) <= 1e-12) h.pop();
+      while (h.length >= 2 && cross(sub(h[h.length - 1], h[h.length - 2]), sub(p, h[h.length - 2])) <= PARALLEL_EPSILON) h.pop();
       h.push(p);
     }
     h.pop();

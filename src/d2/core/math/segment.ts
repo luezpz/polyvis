@@ -7,7 +7,7 @@
 
 import { type Vec2, distance, distanceSq, lerp, sub, cross } from "./vec2";
 import { type Line2, signedDistance } from "./line2";
-import { MIN_LENGTH_SQ, PLANE_EPSILON, Side } from "../../../shared/core/math";
+import { MIN_LENGTH_SQ, PARALLEL_EPSILON, PLANE_EPSILON, Side } from "../../../shared/core/math";
 
 export interface Segment {
   readonly a: Vec2;
@@ -67,7 +67,7 @@ export function segmentIntersection(p0: Vec2, p1: Vec2, q0: Vec2, q1: Vec2, eps 
   const r = sub(p1, p0);
   const s = sub(q1, q0);
   const denom = cross(r, s);
-  if (Math.abs(denom) < 1e-12) return null;
+  if (Math.abs(denom) < PARALLEL_EPSILON) return null;
   const qp = sub(q0, p0);
   const t = cross(qp, s) / denom;
   const u = cross(qp, r) / denom;

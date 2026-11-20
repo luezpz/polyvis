@@ -120,6 +120,18 @@ describe("separators", () => {
     expect(front(inside)).toBe(true);
     expect(front(outside)).toBe(false);
   });
+
+  it("are the same at any level scale (degeneracy test is relative), even for portals sharing an edge", () => {
+    // Two portals hinged on a shared edge, rotated by an irrational angle so the shared
+    // vertices carry rounding noise: the collinear candidates must be skipped at every scale.
+    const c = Math.cos(0.7), sn = Math.sin(0.7);
+    const rot = (x: number, y: number, z: number) => ({ x: c * x - sn * y, y: sn * x + c * y, z });
+    const a: Winding = [rot(0, 0, 0), rot(1, 0, 0), rot(1, 1, 0), rot(0, 1, 0)];
+    const b: Winding = [rot(1, 0, 0), rot(1.7, 0, 0.7), rot(1.7, 1, 0.7), rot(1, 1, 0)];
+    const count = (k: number) => buildSeparators(a.map((v) => ({ x: v.x * k, y: v.y * k, z: v.z * k })), b.map((v) => ({ x: v.x * k, y: v.y * k, z: v.z * k }))).length;
+    const unit = count(1);
+    for (const k of [0.1, 10, 1000, 10000]) expect(count(k)).toBe(unit);
+  });
 });
 
 describe("BitSet", () => {

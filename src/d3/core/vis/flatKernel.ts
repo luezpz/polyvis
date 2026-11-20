@@ -4,12 +4,13 @@
  * (vis/antipenumbra.ts), so results are bit-identical; checked in tests/shared/flatFlow.test.ts.
  */
 
-import { type FlatFlowKernel, MIN_AREA, MIN_LENGTH_SQ, PLANE_EPSILON } from "../../../shared/core";
+import { type FlatFlowKernel, MIN_AREA, MIN_LENGTH_SQ, PLANE_EPSILON, SEPARATOR_SIN_EPSILON } from "../../../shared/core";
 
 // Read once: under Vite's module runner (bench, tests) every import read is a getter chain through the barrels.
 const MIN_AREA_ = MIN_AREA;
 const MIN_LENGTH_SQ_ = MIN_LENGTH_SQ;
 const PLANE_EPSILON_ = PLANE_EPSILON;
+const SIN_EPS_SQ_ = SEPARATOR_SIN_EPSILON * SEPARATOR_SIN_EPSILON;
 
 // Private scratch, grown on demand (the kernel is not re-entrant, which the flow never needs).
 let dist = new Float64Array(64);
@@ -112,12 +113,14 @@ function separatorPass(OW: Float64Array, ow: number, on: number, OT: Float64Arra
     const a = ow + 3 * i, b = ow + 3 * i1;
     const ax = OW[a], ay = OW[a + 1], az = OW[a + 2];
     const ex = OW[b] - ax, ey = OW[b + 1] - ay, ez = OW[b + 2] - az;
+    const eLenSq = ex * ex + ey * ey + ez * ez;
     for (let v = 0; v < otn; v++) {
       const q0 = ot + 3 * v;
       const vx = OT[q0] - ax, vy = OT[q0 + 1] - ay, vz = OT[q0 + 2] - az;
       let nx = ey * vz - ez * vy, ny = ez * vx - ex * vz, nz = ex * vy - ey * vx;
-      const len = Math.sqrt(nx * nx + ny * ny + nz * nz);
-      if (len < 1e-10) continue; // v on the edge's line
+      const lenSq = nx * nx + ny * ny + nz * nz;
+      if (lenSq < SIN_EPS_SQ_ * eLenSq * (vx * vx + vy * vy + vz * vz) || lenSq === 0) continue; // v on the edge's line (scale-free)
+      const len = Math.sqrt(lenSq);
       nx /= len; ny /= len; nz /= len;
       const d = nx * ax + ny * ay + nz * az;
       let ownerSide = 0;

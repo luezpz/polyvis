@@ -177,6 +177,45 @@ describe("worker failures", () => {
     }
   });
 
+  it("WorkerPool falls back to one thread when a worker cannot be created, terminating the partial set", () => {
+    vi.stubGlobal("Worker", FakeWorker);
+    vi.stubGlobal("navigator", { hardwareConcurrency: 4 });
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const made: FakeWorker[] = [];
+      const pool = new WorkerPool(() => {
+        if (made.length === 2) throw new Error("SecurityError");
+        const w = new FakeWorker(); made.push(w); return w as unknown as Worker;
+      });
+      expect(pool.workers()).toBeNull();
+      expect(made.every((w) => w.terminated)).toBe(true);
+      expect(pool.workers()).toBeNull();
+      expect(made).toHaveLength(2); // no retry on later stages
+    } finally {
+      vi.restoreAllMocks();
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("poolRunner recycles the workers after a stage error, so busy threads don't delay later stages", async () => {
+    vi.stubGlobal("Worker", FakeWorker);
+    vi.stubGlobal("navigator", { hardwareConcurrency: 4 });
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const made: FakeWorker[] = [];
+      const pool = new WorkerPool(() => { const w = new FakeWorker(); made.push(w); return w as unknown as Worker; });
+      const run = poolRunner(pool, "test", () => true, (x: number) => x + 1, () => Promise.reject(new Error("stage bug")));
+      expect(await run(1)).toBe(2);
+      expect(made).toHaveLength(3);
+      expect(made.every((w) => w.terminated)).toBe(true);
+      expect(pool.workers()).toHaveLength(3); // fresh workers, pool still enabled
+      expect(made.slice(3).some((w) => w.terminated)).toBe(false);
+    } finally {
+      vi.restoreAllMocks();
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("a crashed pool worker rejects later calls instead of hanging", async () => {
     vi.stubGlobal("Worker", FakeWorker);
     vi.stubGlobal("navigator", { hardwareConcurrency: 3 });

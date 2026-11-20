@@ -16,7 +16,10 @@
  * separators and the region is larger (still conservative).
  */
 
-import { type Plane3, type Winding, clipWinding, PLANE_EPSILON } from "../math";
+import { type Plane3, type Winding, clipWinding, PLANE_EPSILON, SEPARATOR_SIN_EPSILON } from "../math";
+
+/** Copied once: imports are getters under Vite's module runner. */
+const SIN_EPS_SQ = SEPARATOR_SIN_EPSILON * SEPARATOR_SIN_EPSILON;
 
 /**
  * Builds the separating planes between `from` and `to`, oriented so that `to`
@@ -62,11 +65,14 @@ function forEachSeparator(owner: Winding, other: Winding, ownerIsFrom: boolean, 
     const i1 = (i + 1) % n;
     const a = owner[i], b = owner[i1];
     const ex = b.x - a.x, ey = b.y - a.y, ez = b.z - a.z;
+    const eLenSq = ex * ex + ey * ey + ez * ez;
     for (const v of other) {
       const vx = v.x - a.x, vy = v.y - a.y, vz = v.z - a.z;
       let nx = ey * vz - ez * vy, ny = ez * vx - ex * vz, nz = ex * vy - ey * vx;
-      const len = Math.sqrt(nx * nx + ny * ny + nz * nz);
-      if (len < 1e-10) continue; // v lies on the edge's line (shared vertex / collinear)
+      // Scale-free: |e × v|² < sin²·|e|²·|v|² means v lies on the edge's line (shared vertex / collinear).
+      const lenSq = nx * nx + ny * ny + nz * nz;
+      if (lenSq < SIN_EPS_SQ * eLenSq * (vx * vx + vy * vy + vz * vz) || lenSq === 0) continue;
+      const len = Math.sqrt(lenSq);
       nx /= len; ny /= len; nz /= len;
       const d = nx * a.x + ny * a.y + nz * a.z;
 

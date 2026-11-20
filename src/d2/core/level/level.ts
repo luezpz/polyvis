@@ -12,7 +12,7 @@
  */
 
 import {
-  type ConvexPolygon, type Vec2, NO_TAG, MIN_AREA,
+  type ConvexPolygon, type Vec2, NO_TAG, MIN_AREA, NORMAL_EPSILON,
   aabbFromPoints, clipPolygon, convexHull, expandAabb, lineFromPoints, polygonFromAabb, signedArea,
 } from "../math";
 
@@ -143,7 +143,7 @@ function carriedSplitBias(to: readonly Vec2[], from: BrushFlags): readonly numbe
   if (!from.vertices) return src;
   const old = edgeNormals(from.vertices);
   return edgeNormals(to).map((n) => {
-    const j = n ? old.findIndex((m) => m !== null && m.x * n.x + m.y * n.y > 1 - 1e-9) : -1;
+    const j = n ? old.findIndex((m) => m !== null && m.x * n.x + m.y * n.y > 1 - NORMAL_EPSILON) : -1;
     return j >= 0 ? src[j] ?? 0 : 0;
   });
 }

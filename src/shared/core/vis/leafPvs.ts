@@ -17,29 +17,35 @@ import { BitSet } from "./bitset";
  */
 export type PvsSymmetry = "none" | "intersect" | "union";
 
-/** Returns one PVS row per BSP leaf (solid and degenerate leaves get empty rows). */
+/**
+ * Returns one PVS row per BSP leaf (solid and degenerate leaves get empty rows).
+ * Symmetry uses the transpose T (T[a] has b iff row b has a), built in O(set bits), then one
+ * word-wise AND / OR per row: O(L² / 32) instead of a per-bit pass over every leaf pair.
+ */
 export function computeLeafPvs<D extends Dim>(tree: BspTree<D>, graph: PortalGraph<D>, portalVis: readonly BitSet[], symmetry: PvsSymmetry = "none"): BitSet[] {
   const leafCount = tree.leaves.length;
+  const { portals, portalsFrom } = graph;
   const pvs = tree.leaves.map((leaf, i) => {
     const row = new BitSet(leafCount);
     if (leaf.contents !== "empty" || !leaf.region) return row;
     row.set(i);
-    for (const pid of graph.portalsFrom[i]) {
-      row.set(graph.portals[pid].to);
-      for (const k of portalVis[pid].toArray()) row.set(graph.portals[k].to);
+    for (const pid of portalsFrom[i]) {
+      row.set(portals[pid].to);
+      forEachBit(portalVis[pid], (k) => row.set(portals[k].to));
     }
     return row;
   });
 
   if (symmetry === "none") return pvs;
-  const out = pvs.map((row) => row.clone());
-  for (let a = 0; a < leafCount; a++) {
-    for (let b = 0; b < leafCount; b++) {
-      const ab = pvs[a].has(b), ba = pvs[b].has(a);
-      const keep = symmetry === "intersect" ? ab && ba : ab || ba;
-      if (keep) out[a].set(b);
-      else out[a].clear(b);
-    }
+  const transpose = pvs.map(() => new BitSet(leafCount));
+  pvs.forEach((row, a) => forEachBit(row, (b) => transpose[b].set(a)));
+  return pvs.map((row, a) => (symmetry === "intersect" ? row.clone().andWith(transpose[a]) : row.clone().orWith(transpose[a])));
+}
+
+/** Calls `f(i)` for every set bit `i` of `set`, ascending, without allocating (word scan, lowest bit first). */
+function forEachBit(set: BitSet, f: (i: number) => void): void {
+  const words = set.words;
+  for (let w = 0; w < words.length; w++) {
+    for (let bits = words[w]; bits !== 0; bits &= bits - 1) f((w << 5) | (31 - Math.clz32(bits & -bits)));
   }
-  return out;
 }

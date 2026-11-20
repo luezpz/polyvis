@@ -44,3 +44,16 @@ export const KEY_QUANTUM = 1e-4;
  * (Quake's BOGUS_RANGE). Anything this far out is considered unbounded.
  */
 export const WORLD_EXTENT = 1e5;
+
+/**
+ * Scale-free degeneracy test for a plane through edge `e` and point `v` (separators): the plane is
+ * skipped when `|e × v| < SEPARATOR_SIN_EPSILON · |e| · |v|`, i.e. the sine of the angle between `e`
+ * and `v` is below this (v lies on the edge's line). Relative, so it behaves the same at any level scale.
+ */
+export const SEPARATOR_SIN_EPSILON = 1e-10;
+
+/** Near-zero determinant / cross product: two directions are parallel (2D intersection, area tests). */
+export const PARALLEL_EPSILON = 1e-12;
+
+/** Two unit normals with `dot > 1 - NORMAL_EPSILON` are the same direction (collinear / coplanar merges). */
+export const NORMAL_EPSILON = 1e-9;

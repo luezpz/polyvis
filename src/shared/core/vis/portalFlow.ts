@@ -125,7 +125,7 @@ export interface SourceFlow {
  */
 export function portalFlowOrder(mightSee: readonly BitSet[]): number[] {
   const counts = mightSee.map((m) => m.count());
-  return [...mightSee.keys()].sort((a, b) => counts[a] - counts[b]);
+  return Array.from({ length: mightSee.length }, (_, i) => i).sort((a, b) => counts[a] - counts[b]);
 }
 
 /**

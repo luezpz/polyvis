@@ -29,7 +29,7 @@ export function splitterSegments(tree: BspTree): (Segment | null)[] {
       const ex = b.x - a.x, ey = b.y - a.y;
       const c0 = ex * (base.y - a.y) - ey * (base.x - a.x);
       const c1 = ex * dir.y - ey * dir.x; // derivative along dir
-      if (Math.abs(c1) < 1e-12) {
+      if (Math.abs(c1) < shared.PARALLEL_EPSILON) {
         if (c0 < 0) return null;
         continue;
       }

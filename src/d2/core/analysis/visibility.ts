@@ -4,8 +4,13 @@
  * every viewpoint inside the leaf.
  */
 
-import { type Vec2, type Segment, type Line2, addScaled, cross, normalize, sub, segmentIntersection } from "../math";
+import { type Vec2, type Segment, type Line2, PARALLEL_EPSILON, addScaled, cross, normalize, sub, segmentIntersection } from "../math";
 import type { Wall } from "../csg";
+
+/** Line-of-sight oracle: a hit within this of a wall end (segment parameter) counts as blocked (strict tests). */
+const LOS_PARAM_EPSILON = 1e-6;
+/** Visibility polygon: angular offset (radians) of the rays cast either side of each wall endpoint. */
+const CORNER_RAY_OFFSET = 1e-5;
 
 /** Closest wall hit along a ray (same shape as the 3D `RayHit`). */
 export interface RayHit {
@@ -36,11 +41,11 @@ export function castRay(walls: readonly { readonly winding: Segment; readonly pl
 
 /**
  * True if the open segment p→q does not touch any wall. Touching a wall end
- * (within 1e-6 in parameter space) counts as blocked, which keeps the
+ * (within {@link LOS_PARAM_EPSILON} in parameter space) counts as blocked, which keeps the
  * conservativeness tests on the safe side.
  */
 export function lineOfSight(walls: readonly Wall[], p: Vec2, q: Vec2): boolean {
-  return !walls.some((w) => segmentIntersection(p, q, w.winding.a, w.winding.b, 1e-6) !== null);
+  return !walls.some((w) => segmentIntersection(p, q, w.winding.a, w.winding.b, LOS_PARAM_EPSILON) !== null);
 }
 
 /**
@@ -51,7 +56,7 @@ export function lineOfSight(walls: readonly Wall[], p: Vec2, q: Vec2): boolean {
  */
 export function visibilityPolygon(walls: readonly Segment[], origin: Vec2, maxDistance: number, extraRays = 64): Vec2[] {
   const angles: number[] = [];
-  const eps = 1e-5;
+  const eps = CORNER_RAY_OFFSET;
   for (const w of walls) {
     for (const p of [w.a, w.b]) {
       const a = Math.atan2(p.y - origin.y, p.x - origin.x);
@@ -78,7 +83,7 @@ export function visibilityPolygon(walls: readonly Segment[], origin: Vec2, maxDi
 function rayHit(o: Vec2, d: Vec2, s: Segment): number | null {
   const e = sub(s.b, s.a);
   const denom = cross(d, e);
-  if (Math.abs(denom) < 1e-12) return null;
+  if (Math.abs(denom) < PARALLEL_EPSILON) return null;
   const ao = sub(s.a, o);
   const t = cross(ao, e) / denom;
   const u = cross(ao, d) / denom;

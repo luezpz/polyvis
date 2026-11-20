@@ -171,7 +171,15 @@ only decisions, gotchas and open items. The 2D/3D merge (former PLAN.md / PROGRE
   harmless there, matched portals compute identically.)
 - `rayWinding` uses `RAY_EPSILON` (1e-9, a distance past an edge / the sine of the angle to a parallel plane), far tighter than
   `PLANE_EPSILON`: loosening it lets the line-of-sight tests count grazing rays as blocked, which weakens them.
-- Flow `steps` counts only generator tests that ran: a truncated run reports exactly `maxSteps`.
+- Flow `steps` counts only generator tests that ran: a truncated single-threaded run reports exactly
+  `maxSteps`; the parallel flow can overshoot (each in-flight batch gets the whole remainder).
+- 3D separator candidates are skipped by a **relative** test (`SEPARATOR_SIN_EPSILON`, sine of edge × vertex
+  angle), not an absolute cross-product length, so behaviour doesn't depend on level scale. Keep
+  `antipenumbra.ts` and `flatKernel.ts` arithmetic identical.
+- Worker pool: `new Worker` throwing in `workers()` disables the pool (`markBroken`); a stage error in a
+  live worker `recycle`s it (fresh workers next stage, so threads still busy with the failed stage don't
+  stall later ones); only `PoolWorkerError` disables it from `poolRunner`.
+- Windows: Python's `open()` defaults to cp1252; scripts editing sources must pass `encoding="utf-8"`.
 - Git history of the source repos (`polyvis2d` cdac3e9, `polyvis3d` 2de2526) was not carried over.
 
 ## Open TODOs
