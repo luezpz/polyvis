@@ -57,6 +57,7 @@ export function createPassageRows<D extends Dim>(g: Geometry<D>, graph: PortalGr
   const { center, radius } = portalSpheres(g, graph);
   // k clipped to the front of p's plane, per p (k' is the same for every t of p).
   const clipped: (Facet<D> | null | undefined)[] = new Array(n);
+  const touched: number[] = []; // entries of `clipped` set for the current p (reset only those: O(touched), not O(n))
   /** `f` (a part of portal k) clipped to the front of `plane`, sphere-tested first (exact, as in base vis). */
   const clipK = (f: Facet<D>, k: number, plane: Plane<D>): Facet<D> | null => {
     const d = g.signedDistance(plane, center[k]), r = radius[k];
@@ -69,7 +70,8 @@ export function createPassageRows<D extends Dim>(g: Geometry<D>, graph: PortalGr
     const words = new Uint32Array((slot[p1] - slot[p0]) * wordsPerRow);
     for (let p = p0; p < p1; p++) {
       const P = portals[p], mw = mightSee[p].words, out = portalsFrom[P.to];
-      clipped.fill(undefined);
+      for (const q of touched) clipped[q] = undefined;
+      touched.length = 0;
       for (let j = 0; j < out.length; j++) {
         const t = out[j];
         if (!mightSee[p].has(t)) continue;
@@ -85,7 +87,7 @@ export function createPassageRows<D extends Dim>(g: Geometry<D>, graph: PortalGr
           for (let bits = mw[w] & tw[w]; bits !== 0; bits &= bits - 1) {
             const k = (w << 5) | (31 - Math.clz32(bits & -bits));
             let kf = clipped[k];
-            if (kf === undefined) kf = clipped[k] = clipK(portals[k].winding, k, P.plane);
+            if (kf === undefined) { kf = clipped[k] = clipK(portals[k].winding, k, P.plane); touched.push(k); }
             if (!kf) continue;
             seps ??= g.separators(src, pass);
             for (let i = 0; i < seps.length && kf; i++) kf = clipK(kf, k, seps[i]);
@@ -116,7 +118,8 @@ function createPassageRowsFlat<D extends Dim>(g: Geometry<D>, graph: PortalGraph
   const maxSeps = 2 * (maxN + 1) * (maxN + 1);
   // k clipped to the front of p's plane, per p: `kn[k]` = −1 unknown, 0 gone, else its vertex count
   // at `KA[ko[k] ..]` (or the portal itself at XC when `kSame[k]`).
-  const kn = new Int32Array(n), ko = new Int32Array(n), kSame = new Uint8Array(n);
+  const kn = new Int32Array(n).fill(-1), ko = new Int32Array(n), kSame = new Uint8Array(n);
+  const kSet = new Int32Array(n); let kSetN = 0; // entries of `kn` set for the current p (reset only those)
   let KA = new Float64Array(1024), kTop = 0;
   const srcB = new Float64Array((maxN + 1) * k), passB = new Float64Array((maxN + 1) * k);
   const S = new Float64Array(maxSeps * pk);
@@ -134,7 +137,8 @@ function createPassageRowsFlat<D extends Dim>(g: Geometry<D>, graph: PortalGraph
     const words = new Uint32Array((slot[p1] - slot[p0]) * wordsPerRow);
     for (let p = p0; p < p1; p++) {
       const P = portals[p], mw = mightSee[p].words, out = portalsFrom[P.to], ppo = p * pk;
-      kn.fill(-1);
+      for (let i = 0; i < kSetN; i++) kn[kSet[i]] = -1;
+      kSetN = 0;
       kTop = 0;
       for (let j = 0; j < out.length; j++) {
         const t = out[j];
@@ -156,6 +160,7 @@ function createPassageRowsFlat<D extends Dim>(g: Geometry<D>, graph: PortalGraph
             const q = (w << 5) | (31 - Math.clz32(bits & -bits));
             const r = R[q];
             if (kn[q] < 0) {
+              kSet[kSetN++] = q;
               // k' = q clipped to the front of p's plane, sphere-tested first.
               const d = centreDist(PL, ppo, q), qn = VS[q + 1] - VS[q];
               if (d + r <= eps) kn[q] = 0;

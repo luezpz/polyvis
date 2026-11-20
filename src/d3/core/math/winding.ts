@@ -10,7 +10,7 @@
 import { type Vec3, addScaled, cross, distanceSq, dot, lerp, normalize, sub, average } from "./vec3";
 import { type Plane3, flipPlane, planeBasis, projectOntoPlane, signedDistance } from "./plane3";
 import { type Aabb, aabbFromPoints } from "./aabb";
-import { MIN_AREA, MIN_LENGTH_SQ, PLANE_EPSILON, Side } from "../../../shared/core/math";
+import { MIN_AREA, MIN_LENGTH_SQ, PLANE_EPSILON, RAY_EPSILON, Side } from "../../../shared/core/math";
 
 export type Winding = readonly Vec3[];
 
@@ -177,14 +177,17 @@ export function intersectCoplanarWindings(a: Winding, b: Winding, normal: Vec3):
  * of the hit (`origin + dir * t`), or null.
  */
 export function rayWinding(origin: Vec3, dir: Vec3, w: Winding, plane: Plane3, maxT = Infinity): number | null {
+  // Scale-free tests: `denom / |dir|` is the sine of the ray's angle to the plane, and
+  // `cross(b − a, p − a)·n / |b − a|` is p's signed distance inside edge a→b.
   const denom = dot(plane.n, dir);
-  if (Math.abs(denom) < 1e-12) return null;
+  if (denom * denom < RAY_EPSILON * RAY_EPSILON * dot(dir, dir)) return null;
   const t = (plane.d - dot(plane.n, origin)) / denom;
   if (t < 0 || t > maxT) return null;
   const p = addScaled(origin, dir, t);
   for (let i = 0; i < w.length; i++) {
     const a = w[i], b = w[(i + 1) % w.length];
-    if (dot(cross(sub(b, a), sub(p, a)), plane.n) < -1e-9) return null;
+    const e = sub(b, a), c = dot(cross(e, sub(p, a)), plane.n);
+    if (c < 0 && c * c > RAY_EPSILON * RAY_EPSILON * dot(e, e)) return null;
   }
   return t;
 }

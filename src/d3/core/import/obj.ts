@@ -22,7 +22,7 @@
  *     mesh, the usual door slab), returned in {@link ObjImportResult.doors}. Faces of one name form one door.
  */
 
-import { type Plane3, type Vec3, type Winding, cross, dot, newellNormal, normalize, planeBasis, sanitizeWinding, sub, KEY_QUANTUM, PLANE_EPSILON } from "../math";
+import { type Plane3, type Vec3, type Winding, cross, distanceSq, dot, newellNormal, normalize, planeBasis, sanitizeWinding, sub, KEY_QUANTUM, MIN_AREA, PLANE_EPSILON } from "../math";
 
 /** Split bias of a `hint` material without a number: far below any split count, so hinted planes go first. */
 export const OBJ_HINT_BIAS = -1000;
@@ -100,14 +100,7 @@ export function importObj(text: string, options: Partial<ObjImportOptions> = {})
   }
 
   // Weld duplicate positions so shared edges are detected even if the exporter split vertices.
-  const weld = new Map<string, number>();
-  const remap = positions.map((p, i) => {
-    const key = `${Math.round(p.x / KEY_QUANTUM)},${Math.round(p.y / KEY_QUANTUM)},${Math.round(p.z / KEY_QUANTUM)}`;
-    const existing = weld.get(key);
-    if (existing !== undefined) return existing;
-    weld.set(key, i);
-    return i;
-  });
+  const remap = weldPositions(positions);
 
   let skipped = 0;
   const triangles: number[][] = [];
@@ -131,6 +124,30 @@ export function importObj(text: string, options: Partial<ObjImportOptions> = {})
   const doors = [...doorPolys].map(([name, polys]) => ({ name, planes: supportingPlanes(polys.map((p) => p.map((i) => remap[i])), positions) }));
   return { faces, ...(bias.some((b) => b !== 0) ? { faceSplitBias: bias } : {}), doors, triangleCount: triangles.length, skipped };
 }
+
+/**
+ * Welds positions closer than {@link KEY_QUANTUM} (per axis): `remap[i]` = index of the first such position.
+ * Each position is hashed into a grid cell and compared with the 27 cells around it, so two copies
+ * straddling a cell boundary still weld (rounding to one cell alone would miss them).
+ */
+function weldPositions(positions: readonly Vec3[]): number[] {
+  const q = KEY_QUANTUM, qSq = q * q;
+  const grid = new Map<string, number[]>();
+  return positions.map((p, i) => {
+    const cx = Math.round(p.x / q), cy = Math.round(p.y / q), cz = Math.round(p.z / q);
+    for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++) for (let dz = -1; dz <= 1; dz++) {
+      for (const j of grid.get(`${cx + dx},${cy + dy},${cz + dz}`) ?? []) if (distanceSq(p, positions[j]) <= qSq) return j;
+    }
+    const key = `${cx},${cy},${cz}`;
+    const cell = grid.get(key);
+    if (cell) cell.push(i);
+    else grid.set(key, [i]);
+    return i;
+  });
+}
+
+/** True if a Newell vector (`2 × area × normal`) belongs to a polygon below {@link MIN_AREA}: compared squared, no sqrt. */
+const isDegenerateNewell = (n: Vec3): boolean => n.x * n.x + n.y * n.y + n.z * n.z < 4 * MIN_AREA * MIN_AREA;
 
 /** An OBJ name without Blender's `.001`-style duplicate suffix. */
 const baseName = (raw: string): string => raw.trim().replace(/\.\d+$/, "");
@@ -156,7 +173,7 @@ function supportingPlanes(polys: readonly number[][], pos: readonly Vec3[]): Pla
   const out: Plane3[] = [];
   for (const poly of polys) {
     const raw = newellNormal(poly.map((i) => pos[i]));
-    if (raw.x * raw.x + raw.y * raw.y + raw.z * raw.z < 1e-24) continue;
+    if (isDegenerateNewell(raw)) continue;
     let n = normalize(raw), d = dot(n, pos[poly[0]]);
     let front = 0, back = 0;
     for (const p of used) {
@@ -179,7 +196,7 @@ function triangulate(ids: readonly number[], pos: readonly Vec3[]): { tris: numb
   if (ids.length < 3) return { tris: [], complete: false };
   const pts = ids.map((i) => pos[i]);
   const nRaw = newellNormal(pts);
-  if (nRaw.x * nRaw.x + nRaw.y * nRaw.y + nRaw.z * nRaw.z < 1e-24) return { tris: [], complete: false };
+  if (isDegenerateNewell(nRaw)) return { tris: [], complete: false };
   if (ids.length === 3) return { tris: [[...ids]], complete: true };
   const { u, v } = planeBasis({ n: normalize(nRaw), d: 0 });
   const p2 = pts.map((p) => ({ x: dot(p, u), y: dot(p, v) }));

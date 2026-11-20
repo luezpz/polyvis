@@ -29,6 +29,13 @@ export const MIN_VOLUME = 1e-7;
  */
 export const PROBE_OFFSET = 1e-3;
 
+/**
+ * Ray casts (picking, line-of-sight checks): a ray is parallel to a plane when the sine of its angle to
+ * it is below this, and it misses a winding when the hit lies further than this outside an edge
+ * (world units). Much tighter than {@link PLANE_EPSILON} so the line-of-sight tests stay strict.
+ */
+export const RAY_EPSILON = 1e-9;
+
 /** Grid used to quantize coordinates into hash keys for de-duplication. */
 export const KEY_QUANTUM = 1e-4;
 

@@ -84,10 +84,11 @@ export function flowFromSourceFlat<D extends Dim>(geometry: Geometry<D>, graph: 
         : BitSet.andInto(newMight, might, row ?? mightSee[gid], vis);
       if (vis.has(gid) && !fresh) continue;
 
-      if (++steps > budget) {
+      if (steps >= budget) { // out of budget: this step is not run, so not counted
         truncated = true;
         return;
       }
+      steps++;
       top = mark; // drop the previous generator's facets
 
       // 1. Keep the part of the source behind G.

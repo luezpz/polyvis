@@ -169,6 +169,9 @@ only decisions, gotchas and open items. The 2D/3D merge (former PLAN.md / PROGRE
 - `bsp/incremental.ts` keys must keep −0 apart from 0 (`exactKey`): `String(-0)` is "0", but flipped
   planes carry −0 components and the copied tree would differ from `buildBsp`. (`portalKey` conflates them;
   harmless there, matched portals compute identically.)
+- `rayWinding` uses `RAY_EPSILON` (1e-9, a distance past an edge / the sine of the angle to a parallel plane), far tighter than
+  `PLANE_EPSILON`: loosening it lets the line-of-sight tests count grazing rays as blocked, which weakens them.
+- Flow `steps` counts only generator tests that ran: a truncated run reports exactly `maxSteps`.
 - Git history of the source repos (`polyvis2d` cdac3e9, `polyvis3d` 2de2526) was not carried over.
 
 ## Open TODOs

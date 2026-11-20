@@ -179,10 +179,11 @@ export function flowFromSource<D extends Dim>(geometry: Geometry<D>, graph: Port
         : BitSet.andInto(newMight, might, row ?? mightSee[gid], vis);
       if (vis.has(gid) && !fresh) continue;
 
-      if (++steps > budget) {
+      if (steps >= budget) { // out of budget: this step is not run, so not counted
         truncated = true;
         return;
       }
+      steps++;
 
       // 1. Sight lines leave the source forward through G: keep the part of the source behind G.
       facetClips++;

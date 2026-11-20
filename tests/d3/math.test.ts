@@ -50,6 +50,16 @@ describe("planes and windings", () => {
     expect(rayWinding({ x: 3, y: 0, z: 0 }, { x: 0, y: 0, z: 1 }, w, plane)).toBeNull();
     expect(rayWinding({ x: 0, y: 0, z: 0 }, { x: 0, y: 0, z: -1 }, w, plane)).toBeNull();
   });
+
+  it("rayWinding tolerances do not depend on edge length or ray speed", () => {
+    // Bug: the edge test compared |b − a| × distance (units²) to an absolute 1e-9, so on a tiny
+    // winding (edge 2e-4) a ray 1e-6 outside it still counted as a hit.
+    const tiny = square(2, 1e-4), plane = windingPlane(tiny)!;
+    expect(rayWinding({ x: 1e-4 + 1e-6, y: 0, z: 0 }, { x: 0, y: 0, z: 1 }, tiny, plane)).toBeNull();
+    expect(rayWinding({ x: 1e-4 - 1e-6, y: 0, z: 0 }, { x: 0, y: 0, z: 1 }, tiny, plane)).toBeCloseTo(2);
+    // A slow ray (tiny |dir|) is not mistaken for a parallel one.
+    expect(rayWinding({ x: 0, y: 0, z: 0 }, { x: 0, y: 0, z: 1e-13 }, tiny, plane)! / 2e13).toBeCloseTo(1);
+  });
 });
 
 describe("polyhedra", () => {

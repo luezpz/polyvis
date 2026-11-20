@@ -187,3 +187,21 @@ describe("OBJ importer fixes", () => {
     expect(r.faces.reduce((s, f) => s + windingArea(f), 0)).toBeCloseTo(n * n, 6);
   });
 });
+
+describe("importObj welding and degeneracy", () => {
+  it("welds duplicate vertices that straddle a quantization cell boundary", () => {
+    // Bug: welding rounded each position to one grid cell, so 0.00004999 and 0.00005001 (cells 0 and 1) never welded
+    // and the two coplanar triangles were not merged into one quad.
+    const obj = `v 0 0 0
+v 1 0 0
+v 1 1 0
+v 0.00004999 1 0
+v 0.00005001 1 0
+f 1 2 4
+f 2 3 5
+`;
+    const r = importObj(obj, { yUp: false });
+    expect(r.faces.length).toBe(1);
+    expect(r.faces[0].length).toBe(4);
+  });
+});

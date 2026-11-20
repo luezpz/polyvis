@@ -163,6 +163,7 @@ describe("PVS", () => {
   it("truncated flow falls back to base vis (still conservative)", () => {
     const r = compileLevel(SAMPLE_LEVELS[0].create(), { flow: { maxSteps: 50 } });
     expect(r.flowStats.truncated).toBe(true);
+    expect(r.flowStats.steps).toBe(50); // the step that ran out of budget is not run, so not counted
     r.portalVis.forEach((v, i) => expect(v.equals(r.mightSee[i]) || !v.hasAnyNotIn(r.mightSee[i])).toBe(true));
   });
 });
