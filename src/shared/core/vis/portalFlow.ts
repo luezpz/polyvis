@@ -224,7 +224,9 @@ export function flowFromSource<D extends Dim>(geometry: Geometry<D>, graph: Port
   onChain[sourcePortal.from] = 1;
   onChain[sourcePortal.to] = 1;
   recurse(sourcePortal.to, sourcePortal.winding, null, sourceId, mightSee[sourceId], 1);
-  onChain.fill(0);
+  // The walk resets every leaf it marks, so only the two seeded here are left (no O(leafCount) fill).
+  onChain[sourcePortal.from] = 0;
+  onChain[sourcePortal.to] = 0;
 
   // If we were cut short, fall back to the conservative estimate for this portal.
   return { sourceId, vis: truncated ? mightSee[sourceId].clone() : vis, steps, maxChainDepth, truncated, facetClips, separatorClips };

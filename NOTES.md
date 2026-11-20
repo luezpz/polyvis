@@ -126,6 +126,10 @@ only decisions, gotchas and open items. The 2D/3D merge (former PLAN.md / PROGRE
   `doorPortalOpen` / `closedDoorPortals`. Door faces show up in `detailWalls`. OBJ (3D only): objects /
   groups / materials named `door_<name>` become door brushes (`import/objLevel.ts`); volume = the mesh's
   supporting face planes, so a door mesh must be convex (a slab); one with no bounded volume is skipped and reported.
+  OBJ `o` and `g` names are tracked separately (door if group, object or material says so; `o` clears `g`).
+- OBJ coplanar merge (`import/obj.ts` `mergeGroup`): half-edges + union-find, O(1) per merge; only the two new
+  corners are tested (inputs convex), a 180° reversal counts as non-convex, planarity = signed-distance slab
+  ≤ `PLANE_EPSILON` vs the group plane. The old rebuild-per-merge loop was ~O(n⁴) on grids (18 s for 80×80).
 - Phase 3d hint faces = per-face splitter bias (`Brush.faceSplitBias` → `Wall.splitBias` → `BuildContext.planeBias`
   → `splitterScore`), not extra hint brushes. A plane takes the lowest nonzero vote of its walls. Builder specs
   give it in face order (3D box −x, +x, −y, +y, −z, +z; 2D box −y, +x, +y, −x); edits carry it by normal. Editor

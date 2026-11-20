@@ -22,6 +22,8 @@ export class CompileClient<D extends Dim, L> {
   private worker: Worker | null = null;
   private inFlight: number | null = null;
   private pending: { level: L; options: Partial<CompileOptions> } | null = null;
+  /** The job the worker is running, so a worker crash can re-run it on the main thread. */
+  private running: { level: L; options: Partial<CompileOptions> } | null = null;
   private nextId = 1;
 
   constructor(private readonly binding: CompilerBinding<D, L>, private readonly listener: CompileListener<D>) {
@@ -33,6 +35,9 @@ export class CompileClient<D extends Dim, L> {
         this.worker?.terminate();
         this.worker = null;
         this.inFlight = null;
+        // Re-run the lost job unless a newer request already supersedes it.
+        this.pending ??= this.running;
+        this.running = null;
         this.flush();
       };
     } catch (e) {
@@ -75,6 +80,7 @@ export class CompileClient<D extends Dim, L> {
     }
     const id = this.nextId++;
     this.inFlight = id;
+    this.running = job;
     const msg: CompileRequest<L> = { id, level: job.level, options: job.options };
     this.worker.postMessage(msg);
   }
@@ -82,6 +88,7 @@ export class CompileClient<D extends Dim, L> {
   private onResponse(res: CompileResponse<D>): void {
     if (res.id !== this.inFlight) return;
     this.inFlight = null;
+    this.running = null;
     // Deliver even if newer work is pending: a slightly stale result beats a blank view.
     if ("error" in res) this.listener(null, res.error, 0);
     else this.listener(hydrateResult(res.result), null, res.ms);

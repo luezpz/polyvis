@@ -1,9 +1,10 @@
 /** Shared app infrastructure (DOM-free parts): history, view-state snapping, compile protocol and client fallback. */
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { History } from "../../src/shared/app/editor/history";
 import { hydrateResult } from "../../src/shared/app/compile/protocol";
 import { CompileClient } from "../../src/shared/app/compile/compileClient";
+import { WorkerPool } from "../../src/shared/app/compile/workerPool";
 import { BitSet } from "../../src/shared/core";
 import { SAMPLE_LEVELS as SAMPLES_2D, compileLevel as compile2, type Level as Level2 } from "../../src/d2/core";
 import { SAMPLE_LEVELS as SAMPLES_3D, compileLevel as compile3 } from "../../src/d3/core";
@@ -72,5 +73,67 @@ describe("compile protocol", () => {
     while (client.busy) await new Promise((r) => setTimeout(r, 0));
     expect(compiled).toEqual([a, b]);
     expect(results).toHaveLength(2);
+  });
+});
+
+/** Minimal stand-in for a Web Worker: records posts; the test fires `onerror` / `onmessage` by hand. */
+class FakeWorker {
+  onmessage: ((e: MessageEvent) => void) | null = null;
+  onerror: ((e: ErrorEvent) => void) | null = null;
+  posted: unknown[] = [];
+  terminated = false;
+  postMessage(m: unknown): void { this.posted.push(m); }
+  terminate(): void { this.terminated = true; }
+}
+
+describe("worker failures", () => {
+  it("CompileClient re-runs the in-flight job on the main thread when the worker crashes", async () => {
+    const worker = new FakeWorker();
+    const compiled: Level2[] = [];
+    let results = 0;
+    const client = new CompileClient<Dim2, Level2>({
+      createWorker: () => worker as unknown as Worker,
+      compile: (level, options) => { compiled.push(level); return compile2(level, options); },
+    }, (result) => { if (result) results++; });
+    const a = SAMPLES_2D[0].create();
+    client.request(a, {});
+    expect(worker.posted).toHaveLength(1);
+    worker.onerror!({ message: "boom" } as ErrorEvent);
+    expect(worker.terminated).toBe(true);
+    while (client.busy) await new Promise((r) => setTimeout(r, 0));
+    expect(compiled).toEqual([a]);
+    expect(results).toBe(1);
+  });
+
+  it("WorkerPool.markBroken terminates its workers and rejects their pending and later calls", async () => {
+    vi.stubGlobal("Worker", FakeWorker);
+    vi.stubGlobal("navigator", { hardwareConcurrency: 4 });
+    try {
+      const made: FakeWorker[] = [];
+      const pool = new WorkerPool(() => { const w = new FakeWorker(); made.push(w); return w as unknown as Worker; });
+      const calls = pool.workers()!;
+      expect(calls).toHaveLength(3);
+      const pending = calls[0]({ kind: "x" });
+      pool.markBroken();
+      await expect(pending).rejects.toThrow(/terminated/);
+      await expect(calls[1]({ kind: "x" })).rejects.toThrow(/terminated/);
+      expect(made.every((w) => w.terminated)).toBe(true);
+      expect(pool.workers()).toBeNull();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("a crashed pool worker rejects later calls instead of hanging", async () => {
+    vi.stubGlobal("Worker", FakeWorker);
+    vi.stubGlobal("navigator", { hardwareConcurrency: 3 });
+    try {
+      const made: FakeWorker[] = [];
+      const calls = new WorkerPool(() => { const w = new FakeWorker(); made.push(w); return w as unknown as Worker; }).workers()!;
+      made[0].onerror!({ message: "boom" } as ErrorEvent);
+      await expect(calls[0]({ kind: "x" })).rejects.toThrow(/boom/);
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });

@@ -153,7 +153,9 @@ export function flowFromSourceFlat<D extends Dim>(geometry: Geometry<D>, graph: 
   onChain[sourcePortal.from] = 1;
   onChain[sourcePortal.to] = 1;
   recurse(sourcePortal.to, XC, VS[sourceId] * k, VS[sourceId + 1] - VS[sourceId], XC, 0, 0, sourceId, mightSee[sourceId], 1);
-  onChain.fill(0);
+  // The walk resets every leaf it marks, so only the two seeded here are left (no O(leafCount) fill).
+  onChain[sourcePortal.from] = 0;
+  onChain[sourcePortal.to] = 0;
 
   return { sourceId, vis: truncated ? mightSee[sourceId].clone() : vis, steps, maxChainDepth, truncated, facetClips, separatorClips };
 }

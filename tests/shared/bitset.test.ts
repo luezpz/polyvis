@@ -17,3 +17,19 @@ describe("BitSet.andInto", () => {
     expect(a.toArray()).toEqual([3, 33]);
   });
 });
+
+describe("BitSet.toArray / fromHex", () => {
+  it("lists set bits across words, including bit 31 and the last bit", () => {
+    const idx = [0, 1, 31, 32, 63, 64, 99];
+    expect(BitSet.fromIndices(100, idx).toArray()).toEqual(idx);
+    expect(new BitSet(100).toArray()).toEqual([]);
+  });
+
+  it("round-trips through hex and rejects malformed input", () => {
+    const s = BitSet.fromIndices(37, [0, 9, 36]);
+    expect(BitSet.fromHex(37, s.toHex()).equals(s)).toBe(true);
+    expect(() => BitSet.fromHex(37, s.toHex() + "00")).toThrow(); // too long
+    expect(() => BitSet.fromHex(37, "zz00000000")).toThrow(); // not hex
+    expect(() => BitSet.fromHex(37, "00000000e0")).toThrow(); // bits 37..39 beyond size
+  });
+});

@@ -118,3 +118,57 @@ describe("OBJ naming conventions", () => {
     expect(objDoorBrushes(obj.doors, 1)).toEqual({ brushes: [], failed: ["x"] });
   });
 });
+
+describe("OBJ importer fixes", () => {
+  it("hint_0 means bias 0, not the hint default", () => {
+    const obj = ["v 0 0 0", "v 1 0 0", "v 1 1 0", "v 0 1 0", "v 0 0 1", "v 1 0 1", "usemtl hint_0", "f 1 2 3 4", "usemtl hint", "f 1 5 6 2"].join("\n");
+    expect([...importObj(obj, { yUp: false }).faceSplitBias!].sort((a, b) => a - b)).toEqual([OBJ_HINT_BIAS, 0]);
+  });
+
+  it("accepts tabs between keyword and arguments", () => {
+    const obj = ["v\t0 0 0", "v\t1 0 0", "v\t1 1 0", "f\t1 2 3"].join("\n");
+    expect(importObj(obj, { yUp: false }).faces).toHaveLength(1);
+  });
+
+  it("tracks o and g separately: a group inside a door object stays a door, a bare g clears the group", () => {
+    const quad = ["v 0 0 0", "v 1 0 0", "v 1 1 0", "v 0 1 0"];
+    const inObject = importObj([...quad, "o door_a", "g part", "f 1 2 3 4"].join("\n"), { yUp: false });
+    expect(inObject.faces).toHaveLength(0);
+    expect(inObject.doors.map((d) => d.name)).toEqual(["a"]);
+    const cleared = importObj([...quad, "g door_b", "f 1 2 3", "g", "f 1 3 4"].join("\n"), { yUp: false });
+    expect(cleared.doors.map((d) => d.name)).toEqual(["b"]);
+    expect(cleared.faces).toHaveLength(1);
+  });
+
+  it("triangulates a polygon that touches itself at a vertex", () => {
+    // Two triangles joined at vertex 1 (bow tie traced as one loop): 1 2 3 1 4 5.
+    const obj = ["v 0 0 0", "v 1 -1 0", "v 1 1 0", "v -1 1 0", "v -1 -1 0", "f 1 2 3 1 4 5"].join("\n");
+    const r = importObj(obj, { yUp: false });
+    expect(r.skipped).toBe(0);
+    expect(r.faces.reduce((s, f) => s + windingArea(f), 0)).toBeCloseTo(2, 9);
+  });
+
+  it("does not merge near-coplanar triangles into a non-planar face", () => {
+    // Shared edge 1-3; vertex 4 sits 2e-3 off the plane: same rounded group key, but not planar.
+    const obj = ["v 0 0 0", "v 1 0 0", "v 1 1 0", "v 0 1 0.002", "f 1 2 3", "f 1 3 4"].join("\n");
+    expect(importObj(obj, { yUp: false }).faces).toHaveLength(2);
+  });
+
+  it("counts partially dropped polygons as skipped", () => {
+    // A zero-area polygon is dropped whole.
+    const obj = ["v 0 0 0", "v 1 0 0", "v 2 0 0", "v 3 0 0", "f 1 2 3 4"].join("\n");
+    expect(importObj(obj, { yUp: false }).skipped).toBe(1);
+  });
+
+  it("merges a large coplanar grid quickly and keeps its area", () => {
+    const n = 80, lines: string[] = [];
+    for (let y = 0; y <= n; y++) for (let x = 0; x <= n; x++) lines.push(`v ${x} ${y} 0`);
+    const id = (x: number, y: number) => y * (n + 1) + x + 1;
+    for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) lines.push(`f ${id(x, y)} ${id(x + 1, y)} ${id(x + 1, y + 1)}`, `f ${id(x, y)} ${id(x + 1, y + 1)} ${id(x, y + 1)}`);
+    const t0 = performance.now();
+    const r = importObj(lines.join("\n"), { yUp: false });
+    expect(performance.now() - t0).toBeLessThan(2000); // ~0.1 s; the old rebuild-per-merge loop took ~18 s
+    expect(r.faces.length).toBeLessThan(n * n);
+    expect(r.faces.reduce((s, f) => s + windingArea(f), 0)).toBeCloseTo(n * n, 6);
+  });
+});

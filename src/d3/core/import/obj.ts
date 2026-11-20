@@ -17,7 +17,7 @@
  * Naming conventions (Blender material / object names; a trailing `.001` duplicate suffix is ignored):
  *   - material `hint` / `hint_<n>`: hint faces (phase 3d), split bias `n` (default {@link OBJ_HINT_BIAS});
  *     they are ordinary walls that the BSP prefers as splitters.
- *   - object / group (`o` / `g`) or material `door_<name>`: an occluding door (phase 4b). Its faces are
+ *   - group, object (`g` / `o`, tracked separately) or material `door_<name>`: an occluding door (phase 4b). Its faces are
  *     not walls; the door volume is the intersection of its supporting face planes (exact for a convex
  *     mesh, the usual door slab), returned in {@link ObjImportResult.doors}. Faces of one name form one door.
  */
@@ -63,26 +63,31 @@ export function importObj(text: string, options: Partial<ObjImportOptions> = {})
   const polygons: number[][] = [];
   const polygonBias: number[] = [];
   const doorPolys = new Map<string, number[][]>();
-  let material = "", object = "";
+  let material = "", object = "", group = "";
 
   for (const rawLine of text.split(/\r?\n/)) {
     const line = rawLine.trim();
-    if (line.startsWith("usemtl ")) material = baseName(line.slice(7));
-    else if (line.startsWith("o ") || line.startsWith("g ")) object = baseName(line.slice(2));
-    else if (line.startsWith("v ")) {
-      const [x, y, z] = line.slice(2).trim().split(/\s+/).map(Number);
+    // Keyword and arguments are separated by any whitespace (spaces or tabs); a bare `o` / `g` clears the name.
+    const sp = line.search(/\s/);
+    const key = sp < 0 ? line : line.slice(0, sp);
+    const rest = sp < 0 ? "" : line.slice(sp + 1).trim();
+    if (key === "usemtl") material = baseName(rest);
+    else if (key === "o") { object = baseName(rest); group = ""; }
+    else if (key === "g") group = baseName(rest);
+    else if (key === "v") {
+      const [x, y, z] = rest.split(/\s+/).map(Number);
       if (![x, y, z].every(Number.isFinite)) throw new Error(`Bad vertex: ${line}`);
       const s = opts.scale;
       // Y-up → Z-up is the rotation (x, y, z) → (x, −z, y); it preserves winding orientation.
       positions.push(opts.yUp ? { x: x * s, y: -z * s, z: y * s } : { x: x * s, y: y * s, z: z * s });
-    } else if (line.startsWith("f ")) {
-      const idx = line.slice(2).trim().split(/\s+/).map((tok) => {
+    } else if (key === "f") {
+      const idx = rest.split(/\s+/).map((tok) => {
         const i = parseInt(tok.split("/")[0], 10);
         if (!Number.isFinite(i) || i === 0) throw new Error(`Bad face index in: ${line}`);
         return i > 0 ? i - 1 : positions.length + i;
       });
       if (idx.some((i) => i < 0 || i >= positions.length)) throw new Error(`Face index out of range in: ${line}`);
-      const door = doorName(object) ?? doorName(material);
+      const door = doorName(group) ?? doorName(object) ?? doorName(material);
       if (door !== null) {
         const list = doorPolys.get(door) ?? [];
         if (!doorPolys.has(door)) doorPolys.set(door, list);
@@ -109,8 +114,8 @@ export function importObj(text: string, options: Partial<ObjImportOptions> = {})
   const triangleBias: number[] = [];
   polygons.forEach((poly, pi) => {
     const ids = poly.map((i) => remap[i]).filter((v, k, a) => v !== a[(k + 1) % a.length]);
-    const tris = triangulate(ids, positions);
-    if (tris.length === 0) skipped++;
+    const { tris, complete } = triangulate(ids, positions);
+    if (!complete) skipped++;
     for (const t of tris) { triangles.push(t); triangleBias.push(polygonBias[pi]); }
   });
 
@@ -132,11 +137,12 @@ const baseName = (raw: string): string => raw.trim().replace(/\.\d+$/, "");
 /** `name` of `door_<name>`, else null. */
 const doorName = (name: string): string | null => (name.startsWith("door_") && name.length > 5 ? name.slice(5) : null);
 
-/** Split bias of a material: `hint` → {@link OBJ_HINT_BIAS}, `hint_<n>` → n (if finite, else the default), else 0. */
+/** Split bias of a material: `hint` → {@link OBJ_HINT_BIAS}, `hint_<n>` → n (any finite number, so `hint_0` → 0; else the default), else 0. */
 function hintBias(material: string): number {
   if (material !== "hint" && !material.startsWith("hint_")) return 0;
-  const v = Number(material.slice(5));
-  return material.length > 5 && Number.isFinite(v) && v !== 0 ? v : OBJ_HINT_BIAS;
+  const tail = material.slice(5);
+  const v = Number(tail);
+  return tail.trim() !== "" && Number.isFinite(v) ? v : OBJ_HINT_BIAS;
 }
 
 /**
@@ -164,13 +170,16 @@ function supportingPlanes(polys: readonly number[][], pos: readonly Vec3[]): Pla
   return out;
 }
 
-/** Ear-clipping triangulation of a planar polygon given by vertex indices. */
-function triangulate(ids: readonly number[], pos: readonly Vec3[]): number[][] {
-  if (ids.length < 3) return [];
+/**
+ * Ear-clipping triangulation of a planar polygon given by vertex indices.
+ * `complete`: false if (part of) the polygon was dropped as degenerate.
+ */
+function triangulate(ids: readonly number[], pos: readonly Vec3[]): { tris: number[][]; complete: boolean } {
+  if (ids.length < 3) return { tris: [], complete: false };
   const pts = ids.map((i) => pos[i]);
   const nRaw = newellNormal(pts);
-  if (nRaw.x * nRaw.x + nRaw.y * nRaw.y + nRaw.z * nRaw.z < 1e-24) return [];
-  if (ids.length === 3) return [[...ids]];
+  if (nRaw.x * nRaw.x + nRaw.y * nRaw.y + nRaw.z * nRaw.z < 1e-24) return { tris: [], complete: false };
+  if (ids.length === 3) return { tris: [[...ids]], complete: true };
   const { u, v } = planeBasis({ n: normalize(nRaw), d: 0 });
   const p2 = pts.map((p) => ({ x: dot(p, u), y: dot(p, v) }));
   const cross2 = (a: number, b: number, c: number) => (p2[b].x - p2[a].x) * (p2[c].y - p2[a].y) - (p2[b].y - p2[a].y) * (p2[c].x - p2[a].x);
@@ -184,7 +193,9 @@ function triangulate(ids: readonly number[], pos: readonly Vec3[]): number[][] {
     for (let k = 0; k < rest.length; k++) {
       const a = rest[(k + rest.length - 1) % rest.length], b = rest[k], c = rest[(k + 1) % rest.length];
       if (cross2(a, b, c) <= 1e-12) continue; // reflex or degenerate corner
-      if (rest.some((p) => p !== a && p !== b && p !== c && inside(p, a, b, c))) continue;
+      // Compare vertex ids, not loop slots: a polygon touching itself repeats a vertex, which must not block its own ear.
+      const ia = ids[a], ib = ids[b], ic = ids[c];
+      if (rest.some((p) => ids[p] !== ia && ids[p] !== ib && ids[p] !== ic && inside(p, a, b, c))) continue;
       out.push([ids[a], ids[b], ids[c]]);
       rest.splice(k, 1);
       clipped = true;
@@ -193,12 +204,15 @@ function triangulate(ids: readonly number[], pos: readonly Vec3[]): number[][] {
     if (!clipped) break; // numerically degenerate polygon: give up on the remainder
   }
   if (rest.length === 3) out.push(rest.map((k) => ids[k]));
-  return out;
+  // A leftover of zero area (e.g. the doubled-back spokes of a self-touching loop) loses nothing.
+  const left = rest.length === 3 ? null : newellNormal(rest.map((k) => pts[k]));
+  const complete = !left || left.x * left.x + left.y * left.y + left.z * left.z < 1e-24 * (nRaw.x * nRaw.x + nRaw.y * nRaw.y + nRaw.z * nRaw.z + 1);
+  return { tris: out, complete };
 }
 
 /**
  * Greedily merges coplanar polygons (vertex-index loops) that share an edge,
- * as long as the union stays convex.
+ * as long as the union stays convex and planar.
  */
 function mergeCoplanar(polys: readonly number[][], pos: readonly Vec3[], bias: readonly number[]): { loop: number[]; bias: number }[] {
   const normalOf = (p: readonly number[]) => normalize(newellNormal(p.map((i) => pos[i])));
@@ -212,53 +226,102 @@ function mergeCoplanar(polys: readonly number[][], pos: readonly Vec3[], bias: r
     if (g) g.polys.push([...p]);
     else groups.set(key, { normal: n, bias: bias[pi], polys: [[...p]] });
   });
-
   const out: { loop: number[]; bias: number }[] = [];
   for (const { normal, bias: b, polys: group } of groups.values()) {
-    let changed = true;
-    while (changed) {
-      changed = false;
-      const edgeOwner = new Map<string, number>();
-      group.forEach((p, pi) => p.forEach((a, k) => edgeOwner.set(`${a},${p[(k + 1) % p.length]}`, pi)));
-      for (let pi = 0; pi < group.length && !changed; pi++) {
-        const p = group[pi];
-        for (let k = 0; k < p.length; k++) {
-          const a = p[k], b = p[(k + 1) % p.length];
-          const qi = edgeOwner.get(`${b},${a}`);
-          if (qi === undefined || qi === pi) continue;
-          const merged = joinAtEdge(p, group[qi], a, b);
-          if (!merged || !isConvex(merged, pos, normal)) continue;
-          group[pi] = merged;
-          group.splice(qi, 1);
-          changed = true;
-          break;
-        }
-      }
-    }
-    for (const loop of group) out.push({ loop, bias: b });
+    for (const loop of mergeGroup(group, pos, normal)) out.push({ loop, bias: b });
   }
   return out;
 }
 
-/** Joins loop `p` (containing edge a→b) with loop `q` (containing b→a) into one loop. */
-function joinAtEdge(p: readonly number[], q: readonly number[], a: number, b: number): number[] | null {
-  const ib = p.indexOf(b);
-  const ia = q.indexOf(a);
-  if (ib < 0 || ia < 0) return null;
-  const pr = [...p.slice(ib), ...p.slice(0, ib)]; // b ... a
-  const qr = [...q.slice(ia), ...q.slice(0, ia)]; // a ... b
-  const merged = [...pr, ...qr.slice(1, -1)];
-  return new Set(merged).size === merged.length ? merged : null;
+/**
+ * Merges one coplanar group on a half-edge structure, so each merge costs O(1) (amortized):
+ *
+ * - half-edge h runs `from[h] → to[h]` with `next[h]` / `prev[h]` around its loop; `byKey` maps the
+ *   directed edge (a·nv + b) to its half-edge, so the twin of a→b is the half-edge of b→a;
+ * - merging the loops on both sides of h relinks four pointers and kills h and its twin;
+ * - loop identity is a union-find over the input polygons (`root`);
+ * - planarity: each loop keeps the interval [lo, hi] of its vertices' signed distances to the group's
+ *   plane (normal, d0); a merge is allowed only while hi − lo stays within `PLANE_EPSILON` (the rounded
+ *   group key can mix near-coplanar faces, and merging those would make a non-planar face).
+ *
+ * Both input loops are convex, so their union is convex iff its two new corners (at the ends of h) are.
+ * A merge changes only the corners at those two vertices, so only the four half-edges next to them are
+ * re-queued: every other half-edge's test is unchanged.
+ */
+function mergeGroup(group: readonly number[][], pos: readonly Vec3[], normal: Vec3): number[][] {
+  const nv = pos.length;
+  const from: number[] = [], to: number[] = [], next: number[] = [], prev: number[] = [], owner: number[] = [];
+  const parent: number[] = [], lo: number[] = [], hi: number[] = [];
+  const d0 = dot(normal, pos[group[0][0]]);
+  const byKey = new Map<number, number>();
+  group.forEach((p, li) => {
+    parent.push(li);
+    let l = Infinity, h = -Infinity;
+    const base = from.length;
+    p.forEach((v, k) => {
+      const s = dot(normal, pos[v]) - d0;
+      if (s < l) l = s;
+      if (s > h) h = s;
+      const e = base + k, w = p[(k + 1) % p.length];
+      from.push(v); to.push(w); owner.push(li);
+      next.push(base + (k + 1) % p.length); prev.push(base + (k + p.length - 1) % p.length);
+      byKey.set(v * nv + w, e);
+    });
+    lo.push(l); hi.push(h);
+  });
+  const dead = new Uint8Array(from.length);
+  const root = (li: number): number => {
+    while (parent[li] !== li) li = parent[li] = parent[parent[li]];
+    return li;
+  };
+
+  const queue = from.map((_, e) => e);
+  while (queue.length) {
+    const h = queue.pop()!;
+    if (dead[h]) continue;
+    const t = byKey.get(to[h] * nv + from[h]);
+    if (t === undefined || dead[t]) continue;
+    const rp = root(owner[h]), rq = root(owner[t]);
+    if (rp === rq) continue;
+    const a = from[h], e = to[h];
+    // New corners: pPrev → a → qNext and qPrev → e → pNext.
+    if (!convexTurn(pos[from[prev[h]]], pos[a], pos[to[next[t]]], normal) || !convexTurn(pos[from[prev[t]]], pos[e], pos[to[next[h]]], normal)) continue;
+    const l = Math.min(lo[rp], lo[rq]), u = Math.max(hi[rp], hi[rq]);
+    if (u - l > PLANE_EPSILON) continue;
+    const hp = prev[h], hn = next[h], tp = prev[t], tn = next[t];
+    next[hp] = tn; prev[tn] = hp;
+    next[tp] = hn; prev[hn] = tp;
+    dead[h] = dead[t] = 1;
+    byKey.delete(a * nv + e);
+    byKey.delete(e * nv + a);
+    parent[rq] = rp;
+    lo[rp] = l; hi[rp] = u;
+    queue.push(hp, hn, tp, tn);
+  }
+
+  // Walk each surviving loop once.
+  const out: number[][] = [];
+  const seen = new Uint8Array(from.length);
+  for (let s = 0; s < from.length; s++) {
+    if (dead[s] || seen[s]) continue;
+    const loop: number[] = [];
+    for (let e = s; !seen[e]; e = next[e]) {
+      seen[e] = 1;
+      loop.push(from[e]);
+    }
+    out.push(loop);
+  }
+  return out;
 }
 
-/** Convex (collinear vertices allowed) and CCW around `normal`. */
-function isConvex(loop: readonly number[], pos: readonly Vec3[], normal: Vec3): boolean {
-  const n = loop.length;
-  for (let i = 0; i < n; i++) {
-    const a = pos[loop[i]], b = pos[loop[(i + 1) % n]], c = pos[loop[(i + 2) % n]];
-    const e1 = sub(b, a), e2 = sub(c, b);
-    const turn = dot(cross(e1, e2), normal);
-    if (turn < -1e-9 * Math.max(1, Math.sqrt((e1.x * e1.x + e1.y * e1.y + e1.z * e1.z) * (e2.x * e2.x + e2.y * e2.y + e2.z * e2.z)))) return false;
-  }
-  return true;
+/**
+ * True if the corner a→b→c turns left or goes straight on around `normal` (length-relative tolerance).
+ * A 180° reversal (c doubling back along a→b) is not convex: it means the loops share more than one edge.
+ */
+function convexTurn(a: Vec3, b: Vec3, c: Vec3, normal: Vec3): boolean {
+  const e1 = sub(b, a), e2 = sub(c, b);
+  const turn = dot(cross(e1, e2), normal);
+  const tol = 1e-9 * Math.max(1, Math.sqrt((e1.x * e1.x + e1.y * e1.y + e1.z * e1.z) * (e2.x * e2.x + e2.y * e2.y + e2.z * e2.z)));
+  if (turn < -tol) return false;
+  return turn > tol || dot(e1, e2) > 0;
 }

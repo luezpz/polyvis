@@ -103,8 +103,17 @@ export class BitSet {
 
   /** Indices of set bits, ascending. */
   toArray(): number[] {
+    // Word scan: skips empty words, then peels the lowest set bit (`w & -w`) per step.
     const out: number[] = [];
-    for (let i = 0; i < this.size; i++) if (this.has(i)) out.push(i);
+    const words = this.words;
+    for (let wi = 0; wi < words.length; wi++) {
+      let w = words[wi];
+      while (w !== 0) {
+        const low = w & -w;
+        out.push((wi << 5) + 31 - Math.clz32(low));
+        w ^= low;
+      }
+    }
     return out;
   }
 
@@ -133,12 +142,17 @@ export class BitSet {
     return Array.from({ length: w ? words.length / w : 0 }, (_, i) => new BitSet(size, words.subarray(i * w, (i + 1) * w)));
   }
 
+  /** Inverse of {@link toHex}. Throws if `hex` is not exactly `ceil(size / 8)` hex bytes or sets bits `>= size`. */
   static fromHex(size: number, hex: string): BitSet {
+    const bytes = (size + 7) >>> 3;
+    if (hex.length !== bytes * 2 || !/^[0-9a-fA-F]*$/.test(hex)) throw new Error(`BitSet.fromHex: expected ${bytes * 2} hex chars for ${size} bits`);
     const set = new BitSet(size);
-    for (let b = 0; b * 2 < hex.length; b++) {
-      const byte = parseInt(hex.substr(b * 2, 2), 16);
+    for (let b = 0; b < bytes; b++) {
+      const byte = parseInt(hex.slice(b * 2, b * 2 + 2), 16);
       set.words[b >>> 2] |= byte << ((b & 3) * 8);
     }
+    const tail = size & 31;
+    if (tail !== 0 && set.words[set.words.length - 1] >>> tail !== 0) throw new Error("BitSet.fromHex: bits set beyond size");
     return set;
   }
 
