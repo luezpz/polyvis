@@ -7,11 +7,13 @@
 import {
   type CompileResult, type Level, type Vec2,
   type BitSet, centroid, locateLeaf, midpoint, splitterSegments, visibilityPolygon, addScaled, visibleLeaves, doorPortalOpen,
+  isLeafRef, leavesUnder, refToLeaf,
 } from "../../core";
 import type { Camera } from "../editor/camera";
 import type { ViewState } from "../editor/viewState";
 import type { Tool } from "../editor/tools/tool";
 import { type DebugInfo, PORTAL_KIND_RGB, debugInfo, groupRgb, heatRgb, rgbCss } from "../../../shared/app/render/debugInfo";
+import { BSP_BACK_RGB, BSP_FOCUS_RGB, BSP_FRONT_RGB } from "../../../shared/app/render/palette";
 import { Painter } from "./painter";
 import { COLORS, kindColors, leafColor } from "./colors";
 
@@ -59,6 +61,10 @@ export class Renderer {
     if (result && layers.leaves) this.drawLeaves(result);
     if (result && layers.clusters) this.drawLeafFill(result, (leaf, info) => rgbCss(groupRgb(info.leafGroup[leaf]), 0.4));
     if (result && layers.pvsHeat) this.drawLeafFill(result, (leaf, info) => rgbCss(heatRgb(info.pvsHeat[leaf]), 0.45));
+    if (result && layers.bspDepth) {
+      const maxDepth = result.tree.leaves.reduce((m, l) => Math.max(m, l.depth), 1);
+      this.drawLeafFill(result, (leaf) => rgbCss(heatRgb(result.tree.leaves[leaf].depth / maxDepth), 0.45));
+    }
     if (result && layers.pvs) this.drawPvs(result, scene.view);
     if (result && layers.lineOfSight) this.drawLineOfSight(result, scene.view);
     if (layers.brushes) this.drawBrushes(scene.level, scene.selectedId);
@@ -69,6 +75,7 @@ export class Renderer {
     if (result && layers.portalGraph) this.drawPortalGraph(result);
     if (result && layers.labels) this.drawLabels(result);
     if (result?.leaks.leaking) this.drawLeaks(result);
+    if (result && layers.bspTree && scene.view.bspFocus !== null) this.drawBspFocus(result, scene.view.bspFocus);
     if (scene.view.inspect.point && scene.tool.id === "inspect") {
       this.painter.dot(scene.view.inspect.point, scene.view.inspect.pinned ? 5 : 3.5, COLORS.probe, { color: "#000", width: 1 });
     }
@@ -185,6 +192,39 @@ export class Renderer {
       this.painter.line(s.a, s.b, { color: COLORS.splitter, width: 1, dash: [6, 4] });
       if (labels) this.painter.text(midpoint(s.a, s.b), `n${i}`, COLORS.splitter, 10);
     });
+  }
+
+  /**
+   * BSP tree focus: a leaf's region; for a node, the empty leaves of its front (cyan) / back
+   * (orange) subtrees, its region outline and its splitter (the line clipped to the region,
+   * with a tick along the normal, i.e. towards the front).
+   */
+  private drawBspFocus(result: CompileResult, ref: number): void {
+    const { tree } = result;
+    const focus = rgbCss(BSP_FOCUS_RGB, 1);
+    if (isLeafRef(ref)) {
+      const region = tree.leaves[refToLeaf(ref)]?.region;
+      if (region) this.painter.polygon(region.vertices, rgbCss(BSP_FOCUS_RGB, 0.3), { color: focus, width: 2 });
+      return;
+    }
+    const node = tree.nodes[ref];
+    if (!node) return;
+    const fill = (child: number, rgb: readonly [number, number, number]) => {
+      for (const l of leavesUnder(tree, child)) {
+        const leaf = tree.leaves[l];
+        if (leaf.contents === "empty" && leaf.region) this.painter.polygon(leaf.region.vertices, rgbCss(rgb, 0.35), { color: rgbCss(rgb, 0.8), width: 1 });
+      }
+    };
+    fill(node.front, BSP_FRONT_RGB);
+    fill(node.back, BSP_BACK_RGB);
+    if (node.region) this.painter.polygon(node.region.vertices, null, { color: rgbCss(BSP_FOCUS_RGB, 0.6), width: 1, dash: [4, 3] });
+    if (this.splitterCache?.result !== result) this.splitterCache = { result, segments: splitterSegments(tree) };
+    const s = this.splitterCache.segments[ref];
+    if (s) {
+      this.painter.line(s.a, s.b, { color: focus, width: 2.5 });
+      const m = midpoint(s.a, s.b);
+      this.painter.line(m, addScaled(m, tree.planes[node.plane].n, this.camera.pixels(12)), { color: focus, width: 2 });
+    }
   }
 
   private drawWalls(result: CompileResult): void {

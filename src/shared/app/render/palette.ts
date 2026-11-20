@@ -11,3 +11,11 @@ export const KIND_RGB: Readonly<Record<KindName, readonly [number, number, numbe
 export function leafHue(index: number): number {
   return (index * 137.508) % 360;
 }
+
+/**
+ * BSP tree focus colours (RGB 0..1), the same in the tree diagram and both scene views:
+ * the focused node's front subtree, its back subtree, and the node itself / its splitter.
+ */
+export const BSP_FRONT_RGB: readonly [number, number, number] = [0.3, 0.85, 1];
+export const BSP_BACK_RGB: readonly [number, number, number] = [1, 0.62, 0.2];
+export const BSP_FOCUS_RGB: readonly [number, number, number] = [1, 1, 1];

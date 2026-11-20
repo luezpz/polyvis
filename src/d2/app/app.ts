@@ -8,7 +8,7 @@
  */
 
 import {
-  type CompileOptions, type CompileResult, type Vec2,
+  type CompileOptions, type CompileResult, type Dim2, type Vec2,
   DEFAULT_COMPILE_OPTIONS, SAMPLE_LEVELS, ALL_LEVELS, aabbFromPoints, emptyLevel,
   exportPvsJson, exportPvsText, parseLevel, serializeLevel,
 } from "../core";
@@ -22,6 +22,7 @@ import { PolygonTool } from "./editor/tools/polygonTool";
 import { InspectTool } from "./editor/tools/inspectTool";
 import { Renderer } from "./render/renderer";
 import { Panel, type PanelHost } from "./ui/panel";
+import { BspTreeView } from "../../shared/app/ui/bspTreeView";
 import { createCompileClient } from "./compile/compiler";
 import { downloadText, pickTextFile } from "../../shared/app/ui/dom";
 
@@ -37,6 +38,7 @@ export class App implements PanelHost, ToolContext {
   private _activeTool: Tool;
   private readonly renderer: Renderer;
   private readonly panel: Panel;
+  private readonly treeView: BspTreeView<Dim2>;
   private result: CompileResult | null = null;
   private error: string | null = null;
   private readonly compiler: ReturnType<typeof createCompileClient>;
@@ -57,6 +59,7 @@ export class App implements PanelHost, ToolContext {
       this.requestRender();
     });
     this.panel = new Panel(panelRoot, this);
+    this.treeView = new BspTreeView(canvas.parentElement!, (ref) => { this.view.bspFocus = ref; this.requestRender(); });
 
     this.model.onChange((change) => {
       if (change === "level") {
@@ -117,6 +120,7 @@ export class App implements PanelHost, ToolContext {
     requestAnimationFrame(() => {
       this.frameRequested = false;
       this.renderer.draw({ level: this.model.level, selectedId: this.model.selectedId, compiled: this.result, view: this.view, tool: this._activeTool });
+      this.treeView.update(this.result?.tree ?? null, this.view.layers.bspTree);
       this.panel.update();
       this.updateStatus();
     });

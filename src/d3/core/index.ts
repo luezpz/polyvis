@@ -16,3 +16,4 @@ export * from "./export/pvsExport";
 export * from "./import/obj";
 export * from "./import/objLevel";
 export * from "./analysis/visibility";
+export type { Dim3 } from "./geometry";

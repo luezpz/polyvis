@@ -37,6 +37,8 @@ export class ViewState extends BaseViewState<Vec3, Layers, InspectState> {
     walls: false,
     leaves: false,
     splitters: false,
+    bspTree: false,
+    bspDepth: false,
     portals: true,
     portalGraph: false,
     clusters: false,

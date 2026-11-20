@@ -14,3 +14,4 @@ export * from "./pipeline";
 export * from "./runtime";
 export * from "./export/pvsExport";
 export * from "./analysis/visibility";
+export type { Dim2 } from "./geometry";

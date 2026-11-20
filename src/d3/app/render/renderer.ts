@@ -16,6 +16,7 @@
 import {
   type CompileResult, type Level, type Vec3,
   type BitSet, type View, addScaled, castRay, locateLeaf, visibleLeaves, doorPortalOpen, normalize, polyhedronCenter, sphereDirections, splitterWindings, windingCenter, aabbDiagonal,
+  isLeafRef, leavesUnder, refToLeaf,
 } from "../../core";
 import type { Camera } from "../editor/camera";
 import type { ViewState } from "../editor/viewState";
@@ -23,6 +24,7 @@ import type { Tool } from "../editor/tools/tool";
 import { GlContext, type GpuMesh, LineBuilder, TriangleBuilder } from "./gl";
 import { Overlay } from "./overlay";
 import { PORTAL_KIND_RGB, debugInfo, groupRgb, heatRgb } from "../../../shared/app/render/debugInfo";
+import { BSP_BACK_RGB, BSP_FOCUS_RGB, BSP_FRONT_RGB } from "../../../shared/app/render/palette";
 import { BACKGROUND, CSS_COLORS, GL_COLORS, type Rgba, kindRgba, leafRgb } from "./colors";
 
 export interface Probe {
@@ -108,11 +110,11 @@ export class Renderer {
     const probe = scene.probe;
     const rays = result && probe && layers.lineOfSight ? this.lineOfSight(result, probe) : null;
 
-    this.surfaces.update([result, layers.surfaces, layers.pvs, layers.hideCulled, layers.clusters, layers.pvsHeat, probe?.leaf, layers.runtime, layers.runtimeRect, layers.closeDoors, ...runtimeKey(probe, layers.runtime)], () => this.buildSurfaces(result, scene.view, probe));
+    this.surfaces.update([result, layers.surfaces, layers.pvs, layers.hideCulled, layers.clusters, layers.pvsHeat, probe?.leaf, layers.runtime, layers.runtimeRect, layers.closeDoors, layers.bspDepth, layers.bspTree && scene.view.bspFocus, ...runtimeKey(probe, layers.runtime)], () => this.buildSurfaces(result, scene.view, probe));
     this.lines.update([result, layers.walls, layers.leaves, layers.splitters], () => this.buildLines(result, scene.view));
     this.grid.update([layers.grid, scene.view.workZ, scene.view.gridSize, ...this.gridAnchor(scene.view.gridSize)], () => this.buildGrid(scene.view));
     this.fills.update([result, scene.level, layers.portals, layers.brushes, hovered], () => this.buildFills(result, scene, hovered));
-    this.xray.update([result, scene.level, scene.selectedId, layers.brushes, layers.portals, layers.portalGraph, hovered, rays], () => this.buildXray(result, scene, hovered, rays));
+    this.xray.update([result, scene.level, scene.selectedId, layers.brushes, layers.portals, layers.portalGraph, hovered, rays, layers.bspTree && scene.view.bspFocus], () => this.buildXray(result, scene, hovered, rays));
 
     gl.viewport(0, 0, this.canvas.width, this.canvas.height);
     gl.clearColor(...BACKGROUND);
@@ -158,16 +160,25 @@ export class Renderer {
     const row = probe && view.layers.pvs ? result.pvs[probe.leaf] : null;
     const live = row && view.layers.runtime ? runtimeVisible(result, probe!, view.layers.runtimeRect, view.layers.closeDoors) : null;
     const n = GL_COLORS.surfaceNeutral;
+    const side = view.layers.bspTree ? bspFocusSides(result, view.bspFocus) : null;
+    const maxDepth = result.tree.leaves.reduce((m, l) => Math.max(m, l.depth), 1);
     result.surfaces.forEach((surfs, leaf) => {
       if (surfs.length === 0) return;
       let color: Rgba;
-      if (row && leaf === probe!.leaf) color = GL_COLORS.pvsCurrent;
+      if (side) {
+        // BSP tree focus: front subtree cyan, back subtree orange, the rest neutral.
+        const sd = side[leaf];
+        const c = sd === 1 ? BSP_FRONT_RGB : sd === 2 ? BSP_BACK_RGB : sd === 3 ? BSP_FOCUS_RGB : null;
+        color = c ? [n[0] * 0.3 + c[0] * 0.7, n[1] * 0.3 + c[1] * 0.7, n[2] * 0.3 + c[2] * 0.7, 1] : n;
+      } else if (row && leaf === probe!.leaf) color = GL_COLORS.pvsCurrent;
       else if (row && !row.has(leaf)) {
         if (view.layers.hideCulled) return;
         color = GL_COLORS.pvsHidden;
       } else if (live && !live.has(leaf)) {
         if (view.layers.hideCulled) return;
         color = GL_COLORS.pvsRuntimeCulled;
+      } else if (view.layers.bspDepth) {
+        color = [...heatRgb(result.tree.leaves[leaf].depth / maxDepth), 1];
       } else if (view.layers.pvsHeat) {
         color = [...heatRgb(debugInfo(result).pvsHeat[leaf]), 1];
       } else {
@@ -306,7 +317,37 @@ export class Renderer {
       }
     }
     if (rays) for (const h of rays.hits) lb.segment(rays.from, h.point, GL_COLORS.ray);
+    if (result && layers.bspTree && scene.view.bspFocus !== null) this.bspFocusLines(lb, result, scene.view.bspFocus);
     return lb.build();
+  }
+
+  /**
+   * BSP tree focus (x-ray): a leaf's region; for a node, its region, its splitter (the plane
+   * clipped to the region) and the empty leaves of its front / back subtrees.
+   */
+  private bspFocusLines(lb: LineBuilder, result: CompileResult, ref: number): void {
+    const { tree } = result;
+    const outline = (leaf: number, c: Rgba) => {
+      const l = tree.leaves[leaf];
+      if (l?.region && l.contents === "empty") for (const f of l.region.faces) lb.loop(f.winding, c);
+    };
+    if (isLeafRef(ref)) {
+      const region = tree.leaves[refToLeaf(ref)]?.region;
+      if (region) for (const f of region.faces) lb.loop(f.winding, [...BSP_FOCUS_RGB, 1]);
+      return;
+    }
+    const node = tree.nodes[ref];
+    if (!node) return;
+    for (const l of leavesUnder(tree, node.front)) outline(l, [...BSP_FRONT_RGB, 0.5]);
+    for (const l of leavesUnder(tree, node.back)) outline(l, [...BSP_BACK_RGB, 0.5]);
+    if (node.region) for (const f of node.region.faces) lb.loop(f.winding, [...BSP_FOCUS_RGB, 0.6]);
+    if (this.splitters?.result !== result) this.splitters = { result, value: splitterWindings(tree) };
+    const w = this.splitters.value[ref];
+    if (w) {
+      lb.loop(w, [...BSP_FOCUS_RGB, 1]);
+      // Diagonals make the splitter read as a surface, not just another outline.
+      for (let i = 1; i + 1 < w.length; i++) lb.segment(w[0], w[i + 1], [...BSP_FOCUS_RGB, 0.35]);
+    }
   }
 
   // ---- Line of sight -------------------------------------------------------
@@ -370,6 +411,25 @@ export class Renderer {
 
     scene.tool.drawOverlay?.(o);
   }
+}
+
+/**
+ * Per leaf, which side of the focused BSP ref it is on: 1 front subtree, 2 back subtree,
+ * 3 the focused leaf itself, 0 elsewhere. Null when nothing is focused.
+ */
+function bspFocusSides(result: CompileResult, ref: number | null): Uint8Array | null {
+  if (ref === null) return null;
+  const { tree } = result;
+  const side = new Uint8Array(tree.leaves.length);
+  if (isLeafRef(ref)) {
+    if (refToLeaf(ref) < side.length) side[refToLeaf(ref)] = 3;
+    return side;
+  }
+  const node = tree.nodes[ref];
+  if (!node) return null;
+  for (const l of leavesUnder(tree, node.front)) side[l] = 1;
+  for (const l of leavesUnder(tree, node.back)) side[l] = 2;
+  return side;
 }
 
 function kindCssBright(kind: "room" | "solid"): string {

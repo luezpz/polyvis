@@ -142,6 +142,10 @@ only decisions, gotchas and open items. The 2D/3D merge (former PLAN.md / PROGRE
 - No `Math.hypot` anywhere (slow): lengths are `Math.sqrt` of explicit products. Threshold comparisons use
   squared values (`distanceSq` in both vec modules, `MIN_LENGTH_SQ`) and skip the sqrt. Bench results were
   unchanged by the switch.
+- BSP tree diagram (2026-11-19): `shared/core/bsp/treeLayout.ts` (layout + balance stats, iterative for deep
+  trees) feeds the floating `shared/app/ui/bspTreeView.ts` (layer `bspTree`). Hover/click sets
+  `view.bspFocus` (a ChildRef, reset per compile); both renderers highlight front (cyan) / back (orange)
+  subtrees + splitter. `bspDepth` layer = leaf depth heatmap.
 
 ## Gotchas
 - Profiles under `--runner` / vitest show Vite's module runner `get` (import bindings resolved through

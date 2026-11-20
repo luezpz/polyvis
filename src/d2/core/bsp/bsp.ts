@@ -10,6 +10,7 @@ import { type Dim2, geometry2 } from "../geometry";
 export {
   type BspBuildOptions, type BspStats, type ChildRef, type LeafContents, type RefineOptions,
   BOUNDS_TAG, isLeafRef, leafRef, refToLeaf,
+  type BspTreeLayout, type BspBalance, bspTreeLayout, bspBalance, leavesUnder,
 } from "../../../shared/core";
 
 export type BspNode = shared.BspNode<Dim2>;

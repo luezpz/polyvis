@@ -5,7 +5,7 @@
  */
 
 import {
-  type Aabb, type CompileOptions, type CompileResult,
+  type Aabb, type CompileOptions, type Dim3, type CompileResult,
   DEFAULT_COMPILE_OPTIONS, SAMPLE_LEVELS, ALL_LEVELS, aabbFromPoints, brushVertices, emptyLevel, exportPvsJson, exportPvsText,
   importObj, locateLeaf, parseLevel, serializeLevel,
 } from "../core";
@@ -19,6 +19,7 @@ import { PolygonTool } from "./editor/tools/polygonTool";
 import { InspectTool } from "./editor/tools/inspectTool";
 import { type Probe, Renderer } from "./render/renderer";
 import { Panel, type PanelHost } from "./ui/panel";
+import { BspTreeView } from "../../shared/app/ui/bspTreeView";
 import { downloadText, pickFile, pickTextFile } from "../../shared/app/ui/dom";
 import { createCompileClient } from "./compile/compiler";
 
@@ -37,6 +38,7 @@ export class App implements PanelHost, ToolContext {
   private _activeTool: Tool;
   private readonly renderer: Renderer;
   private readonly panel: Panel;
+  private readonly treeView: BspTreeView<Dim3>;
   private readonly compiler: ReturnType<typeof createCompileClient>;
   private result: CompileResult | null = null;
   private error: string | null = null;
@@ -58,6 +60,7 @@ export class App implements PanelHost, ToolContext {
       this.requestRender();
     });
     this.panel = new Panel(panelRoot, this);
+    this.treeView = new BspTreeView(canvas.parentElement!, (ref) => { this.view.bspFocus = ref; this.requestRender(); });
 
     this.model.onChange((change) => {
       if (change === "level") {
@@ -125,6 +128,7 @@ export class App implements PanelHost, ToolContext {
         tool: this._activeTool,
         probe: this.currentProbe(),
       });
+      this.treeView.update(this.result?.tree ?? null, this.view.layers.bspTree);
       this.panel.update();
       this.updateStatus();
     });

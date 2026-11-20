@@ -25,6 +25,8 @@ export class ViewState extends BaseViewState<Vec2, Layers, InspectState> {
     brushes: true,
     leaves: true,
     splitters: false,
+    bspTree: false,
+    bspDepth: false,
     walls: true,
     surfaces: true,
     portals: true,

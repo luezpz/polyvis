@@ -7,3 +7,4 @@ export * from "./parallelBuild";
 export * from "./pack";
 export * from "./query";
 export * from "./surfaces";
+export * from "./treeLayout";

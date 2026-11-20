@@ -12,6 +12,10 @@ export interface BaseLayers {
   walls: boolean;
   leaves: boolean;
   splitters: boolean;
+  /** Floating diagram of the BSP tree (hover a node to highlight its region / subtrees). */
+  bspTree: boolean;
+  /** Empty leaves coloured by their BSP depth (balance heatmap). */
+  bspDepth: boolean;
   portals: boolean;
   portalGraph: boolean;
   clusters: boolean;
@@ -34,6 +38,8 @@ export const BASE_LAYER_LABELS: Readonly<Record<keyof BaseLayers, string>> = {
   walls: "Walls (CSG result)",
   leaves: "BSP leaves",
   splitters: "BSP splitters",
+  bspTree: "BSP tree diagram",
+  bspDepth: "BSP leaf depth heatmap",
   portals: "Portals",
   portalGraph: "Portal graph",
   clusters: "Vis clusters",
@@ -66,6 +72,12 @@ export abstract class BaseViewState<V extends Coords<V>, L extends BaseLayers, I
   /** Grid / snapping step in world units (0 disables snapping). */
   gridSize = 1;
   snap = true;
+
+  /**
+   * BSP child ref hovered / pinned in the tree diagram (`>= 0` node, `< 0` leaf `~ref`), or null.
+   * Only meaningful for the current compile result; the diagram clears it on recompile.
+   */
+  bspFocus: number | null = null;
 
   /** Rounds `v` to the grid when snapping is on. */
   snapValue(v: number): number {
