@@ -58,6 +58,21 @@ describe("OBJ import", () => {
     expect(faces.reduce((s, f) => s + windingArea(f), 0)).toBeCloseTo(3);
     expect(faces.length).toBeGreaterThanOrEqual(2);
   });
+
+  it("never merges across a directed edge shared by two faces (non-manifold / duplicated face)", () => {
+    const square = "v 0 0 0\nv 1 0 0\nv 1 1 0\nv 0 1 0\nf 1 2 3\nf 1 3 4\n";
+    expect(importObj(square, { yUp: false }).faces).toHaveLength(1);
+    // A duplicate of the first triangle gives edge 3→1 two owners: its twin is ambiguous.
+    expect(importObj(`${square}f 1 2 3\n`, { yUp: false }).faces).toHaveLength(3);
+  });
+
+  it("merges near-identical planes that straddle a grouping bucket boundary", () => {
+    // Two triangles folded by 1e-10 along an edge 1000 units from the origin: plane offsets
+    // 0.5e-3 ∓ 1e-7 round to different d buckets, though the faces are coplanar within tolerance.
+    const z = 0.0005, f = z + 1e-10;
+    const obj = `v 0 1000 ${z}\nv 1 1000 ${z}\nv 1 1001 ${f}\nv 0 999 ${f}\nf 1 2 3\nf 2 1 4\n`;
+    expect(importObj(obj, { yUp: false }).faces).toHaveLength(1);
+  });
 });
 
 /** OBJ text (Z-up, `yUp: false`) of an axis-aligned box; `inward`: faces seen from inside (a room). */

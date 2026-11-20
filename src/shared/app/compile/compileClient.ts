@@ -1,7 +1,9 @@
 /**
  * Runs compilations in a Web Worker, at most one at a time: while one is in
  * flight, newer requests replace each other and only the latest is sent when
- * the worker becomes free (so dragging a brush never queues up stale work).
+ * the worker becomes free (so dragging a brush never queues up stale work). A compile that has run
+ * longer than `cancelAfterMs` when a newer request arrives is abandoned: the worker is terminated and
+ * replaced (respawning costs far less than waiting out a long stale compile).
  * Falls back to compiling on the main thread if workers are unavailable.
  */
 
@@ -26,13 +28,24 @@ export class CompileClient<D extends Dim, L> {
   private running: { level: L; options: Partial<CompileOptions> } | null = null;
   private nextId = 1;
 
-  constructor(private readonly binding: CompilerBinding<D, L>, private readonly listener: CompileListener<D>) {
+  /** `performance.now()` when the in-flight worker job was posted. */
+  private startedAt = 0;
+
+  /** `cancelAfterMs`: an in-flight compile older than this is abandoned when a newer request arrives. */
+  constructor(private readonly binding: CompilerBinding<D, L>, private readonly listener: CompileListener<D>, private readonly cancelAfterMs = 1000) {
+    this.startWorker();
+  }
+
+  /** Creates the worker and its handlers; leaves `worker` null (main-thread fallback) if that fails. */
+  private startWorker(): void {
     try {
-      this.worker = binding.createWorker();
-      this.worker.onmessage = (e: MessageEvent<CompileResponse<D>>) => this.onResponse(e.data);
-      this.worker.onerror = (e) => {
+      const worker = this.binding.createWorker();
+      this.worker = worker;
+      worker.onmessage = (e: MessageEvent<CompileResponse<D>>) => this.onResponse(e.data);
+      worker.onerror = (e) => {
+        if (this.worker !== worker) return; // an abandoned worker
         console.error("Compile worker failed, falling back to the main thread", e);
-        this.worker?.terminate();
+        worker.terminate();
         this.worker = null;
         this.inFlight = null;
         // Re-run the lost job unless a newer request already supersedes it.
@@ -55,6 +68,14 @@ export class CompileClient<D extends Dim, L> {
   request(level: L, options: Partial<CompileOptions>): void {
     this.pending = { level, options };
     if (this.inFlight === null) this.flush();
+    else if (this.worker && this.inFlight > 0 && performance.now() - this.startedAt > this.cancelAfterMs) {
+      // Stale and slow: drop it instead of making the user wait for a result they no longer want.
+      this.worker.terminate();
+      this.inFlight = null;
+      this.running = null;
+      this.startWorker();
+      this.flush();
+    }
   }
 
   private flush(): void {
@@ -81,6 +102,7 @@ export class CompileClient<D extends Dim, L> {
     const id = this.nextId++;
     this.inFlight = id;
     this.running = job;
+    this.startedAt = performance.now();
     const msg: CompileRequest<L> = { id, level: job.level, options: job.options };
     this.worker.postMessage(msg);
   }
@@ -90,7 +112,7 @@ export class CompileClient<D extends Dim, L> {
     this.inFlight = null;
     this.running = null;
     // Deliver even if newer work is pending: a slightly stale result beats a blank view.
-    if ("error" in res) this.listener(null, res.error, 0);
+    if ("error" in res) this.listener(null, res.error, res.ms);
     else this.listener(hydrateResult(res.result), null, res.ms);
     this.flush();
   }

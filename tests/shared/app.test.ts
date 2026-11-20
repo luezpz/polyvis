@@ -4,7 +4,8 @@ import { describe, expect, it, vi } from "vitest";
 import { History } from "../../src/shared/app/editor/history";
 import { hydrateResult } from "../../src/shared/app/compile/protocol";
 import { CompileClient } from "../../src/shared/app/compile/compileClient";
-import { WorkerPool } from "../../src/shared/app/compile/workerPool";
+import { WorkerPool, PoolWorkerError } from "../../src/shared/app/compile/workerPool";
+import { poolRunner } from "../../src/shared/app/compile/poolRunner";
 import { BitSet } from "../../src/shared/core";
 import { SAMPLE_LEVELS as SAMPLES_2D, compileLevel as compile2, type Level as Level2 } from "../../src/d2/core";
 import { SAMPLE_LEVELS as SAMPLES_3D, compileLevel as compile3 } from "../../src/d3/core";
@@ -103,6 +104,58 @@ describe("worker failures", () => {
     while (client.busy) await new Promise((r) => setTimeout(r, 0));
     expect(compiled).toEqual([a]);
     expect(results).toBe(1);
+  });
+
+  it("poolRunner keeps the pool after a stage error, disables it only when a worker dies", async () => {
+    vi.stubGlobal("Worker", FakeWorker);
+    vi.stubGlobal("navigator", { hardwareConcurrency: 4 });
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const pool = new WorkerPool(() => new FakeWorker() as unknown as Worker);
+      let err: Error = new Error("stage bug");
+      const run = poolRunner(pool, "test", () => true, (x: number) => x + 1, () => Promise.reject(err));
+      expect(await run(1)).toBe(2);
+      expect(pool.workers()).not.toBeNull();
+      err = new PoolWorkerError("pool worker failed");
+      expect(await run(1)).toBe(2);
+      expect(pool.workers()).toBeNull();
+    } finally {
+      vi.restoreAllMocks();
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("CompileClient abandons a slow stale compile for a newer request, but keeps a fresh one", () => {
+    const made: FakeWorker[] = [];
+    const client = new CompileClient<Dim2, Level2>({
+      createWorker: () => { const w = new FakeWorker(); made.push(w); return w as unknown as Worker; },
+      compile: compile2,
+    }, () => {}, 1000);
+    const a = SAMPLES_2D[0].create();
+    const now = vi.spyOn(performance, "now").mockReturnValue(0);
+    try {
+      client.request(a, {});
+      now.mockReturnValue(500);
+      client.request(a, {}); // in flight for 0.5 s: queued
+      expect(made).toHaveLength(1);
+      now.mockReturnValue(2000);
+      client.request(a, {}); // in flight for 2 s: abandoned
+      expect(made[0].terminated).toBe(true);
+      expect(made).toHaveLength(2);
+      expect(made[1].posted).toHaveLength(1);
+    } finally {
+      now.mockRestore();
+    }
+  });
+
+  it("CompileClient reports the worker's time for failed compiles", () => {
+    const worker = new FakeWorker();
+    const got: [string | null, number][] = [];
+    const client = new CompileClient<Dim2, Level2>({ createWorker: () => worker as unknown as Worker, compile: compile2 }, (_r, e, ms) => got.push([e, ms]));
+    client.request(SAMPLES_2D[0].create(), {});
+    const { id } = worker.posted[0] as { id: number };
+    worker.onmessage!({ data: { id, error: "bad level", ms: 12 } } as MessageEvent);
+    expect(got).toEqual([["bad level", 12]]);
   });
 
   it("WorkerPool.markBroken terminates its workers and rejects their pending and later calls", async () => {

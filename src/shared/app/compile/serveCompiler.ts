@@ -21,7 +21,7 @@ export function serveCompiler<D extends Dim, L>(compile: (level: L, options: Par
       const result = await compile(level, options);
       scope.postMessage({ id, result, ms: performance.now() - t0 });
     } catch (err) {
-      scope.postMessage({ id, error: err instanceof Error ? err.message : String(err) });
+      scope.postMessage({ id, error: err instanceof Error ? err.message : String(err), ms: performance.now() - t0 });
     }
   };
 }

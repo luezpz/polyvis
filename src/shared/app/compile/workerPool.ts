@@ -7,6 +7,12 @@
 /** Upper bound on pool threads. */
 const MAX_THREADS = 16;
 
+/**
+ * A pool worker died or was terminated (as opposed to a stage throwing inside a live worker): the
+ * only failure that should disable the pool, since a stage error would recur on any thread.
+ */
+export class PoolWorkerError extends Error {}
+
 /** Sends one request (with a fresh `id`) to a pool worker and resolves with its response. */
 export type PoolCall = <Res>(req: object) => Promise<Res>;
 
@@ -31,7 +37,7 @@ function workerCall(worker: Worker): { call: PoolCall; kill: () => void } {
     for (const p of pending.values()) p.reject(dead);
     pending.clear();
   };
-  worker.onerror = (e) => fail(new Error(`pool worker failed: ${e.message}`));
+  worker.onerror = (e) => fail(new PoolWorkerError(`pool worker failed: ${e.message}`));
   const call: PoolCall = <Res>(req: object) => new Promise<Res>((resolve, reject) => {
     if (dead) return reject(dead);
     const id = nextId++;
@@ -40,7 +46,7 @@ function workerCall(worker: Worker): { call: PoolCall; kill: () => void } {
   });
   const kill = (): void => {
     worker.terminate();
-    fail(new Error("pool worker terminated"));
+    fail(new PoolWorkerError("pool worker terminated"));
   };
   return { call, kill };
 }

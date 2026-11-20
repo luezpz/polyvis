@@ -1,10 +1,10 @@
 /**
  * The pattern every parallel stage runner shares: use the {@link WorkerPool} when the input is big
- * enough and the pool works, otherwise (or after a failure, which disables the pool) run the
- * stage on this thread.
+ * enough and the pool works, otherwise run the stage on this thread. A parallel failure also falls
+ * back to this thread; only a dead worker ({@link PoolWorkerError}) disables the pool for later stages.
  */
 
-import type { PoolCall, WorkerPool } from "./workerPool";
+import { type PoolCall, type WorkerPool, PoolWorkerError } from "./workerPool";
 
 /**
  * Wraps a stage as a pool runner. `big(firstArg)`: worth going parallel; `single(...args)`: the
@@ -18,8 +18,9 @@ export function poolRunner<A extends unknown[], R>(pool: WorkerPool, name: strin
     try {
       return await parallel(calls, ...args);
     } catch (e) {
-      console.warn(`Parallel ${name} failed, using one thread`, e);
-      pool.markBroken();
+      const dead = e instanceof PoolWorkerError;
+      console.warn(`Parallel ${name} failed, using one thread${dead ? " from now on" : ""}`, e);
+      if (dead) pool.markBroken();
       return single(...args);
     }
   };

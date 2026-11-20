@@ -127,7 +127,8 @@ export function importObj(text: string, options: Partial<ObjImportOptions> = {})
     if (w) { faces.push(w); bias.push(b); }
     else skipped++;
   }
-  const doors = [...doorPolys].map(([name, polys]) => ({ name, planes: supportingPlanes(polys, positions) }));
+  // Welded like the walls, so a door's planes come from the same vertices as the faces around it.
+  const doors = [...doorPolys].map(([name, polys]) => ({ name, planes: supportingPlanes(polys.map((p) => p.map((i) => remap[i])), positions) }));
   return { faces, ...(bias.some((b) => b !== 0) ? { faceSplitBias: bias } : {}), doors, triangleCount: triangles.length, skipped };
 }
 
@@ -183,6 +184,8 @@ function triangulate(ids: readonly number[], pos: readonly Vec3[]): { tris: numb
   const { u, v } = planeBasis({ n: normalize(nRaw), d: 0 });
   const p2 = pts.map((p) => ({ x: dot(p, u), y: dot(p, v) }));
   const cross2 = (a: number, b: number, c: number) => (p2[b].x - p2[a].x) * (p2[c].y - p2[a].y) - (p2[b].y - p2[a].y) * (p2[c].x - p2[a].x);
+  // Corner tolerance relative to the polygon's size (|nRaw| = twice its area), so scale does not matter.
+  const cornerEps = 1e-12 * Math.sqrt(nRaw.x * nRaw.x + nRaw.y * nRaw.y + nRaw.z * nRaw.z);
   const inside = (p: number, a: number, b: number, c: number) => cross2(a, b, p) >= 0 && cross2(b, c, p) >= 0 && cross2(c, a, p) >= 0;
 
   const rest = ids.map((_, k) => k);
@@ -192,7 +195,7 @@ function triangulate(ids: readonly number[], pos: readonly Vec3[]): { tris: numb
     let clipped = false;
     for (let k = 0; k < rest.length; k++) {
       const a = rest[(k + rest.length - 1) % rest.length], b = rest[k], c = rest[(k + 1) % rest.length];
-      if (cross2(a, b, c) <= 1e-12) continue; // reflex or degenerate corner
+      if (cross2(a, b, c) <= cornerEps) continue; // reflex or degenerate corner
       // Compare vertex ids, not loop slots: a polygon touching itself repeats a vertex, which must not block its own ear.
       const ia = ids[a], ib = ids[b], ic = ids[c];
       if (rest.some((p) => ids[p] !== ia && ids[p] !== ib && ids[p] !== ic && inside(p, a, b, c))) continue;
@@ -217,20 +220,56 @@ function triangulate(ids: readonly number[], pos: readonly Vec3[]): { tris: numb
 function mergeCoplanar(polys: readonly number[][], pos: readonly Vec3[], bias: readonly number[]): { loop: number[]; bias: number }[] {
   const normalOf = (p: readonly number[]) => normalize(newellNormal(p.map((i) => pos[i])));
   // Faces of different split bias never merge (a hint face stays its own face).
-  const groups = new Map<string, { normal: Vec3; bias: number; polys: number[][] }>();
+  const groups = new Map<string, Group>();
+  const all: Group[] = [];
   polys.forEach((p, pi) => {
     const n = normalOf(p);
     const d = dot(n, pos[p[0]]);
-    const key = `${Math.round(n.x * 1e4)},${Math.round(n.y * 1e4)},${Math.round(n.z * 1e4)},${Math.round(d * 1e3)}|${bias[pi]}`;
-    const g = groups.get(key);
+    const g = findGroup(groups, n, d, bias[pi]);
     if (g) g.polys.push([...p]);
-    else groups.set(key, { normal: n, bias: bias[pi], polys: [[...p]] });
+    else {
+      const ng: Group = { normal: n, d, bias: bias[pi], polys: [[...p]] };
+      groups.set(groupKey(bucketOf(n, d), bias[pi]), ng);
+      all.push(ng);
+    }
   });
   const out: { loop: number[]; bias: number }[] = [];
-  for (const { normal, bias: b, polys: group } of groups.values()) {
+  for (const { normal, bias: b, polys: group } of all) {
     for (const loop of mergeGroup(group, pos, normal)) out.push({ loop, bias: b });
   }
   return out;
+}
+
+/** A coplanar group of `mergeCoplanar`: its first face's plane (`normal`, `d`) and split bias. */
+interface Group {
+  readonly normal: Vec3;
+  readonly d: number;
+  readonly bias: number;
+  readonly polys: number[][];
+}
+
+/** Bucket scales of a plane (normal, d) in `mergeCoplanar`; faces closer than one bucket are candidates. */
+const NORMAL_BUCKET = 1e4, D_BUCKET = 1e3;
+
+/** Scaled plane coordinates (nx, ny, nz, d) whose rounding is the bucket. */
+const bucketOf = (n: Vec3, d: number): number[] => [n.x * NORMAL_BUCKET, n.y * NORMAL_BUCKET, n.z * NORMAL_BUCKET, d * D_BUCKET];
+
+const groupKey = (cell: readonly number[], bias: number): string => `${cell.map(Math.round).join(",")}|${bias}`;
+
+/**
+ * The group of plane (n, d) with split bias `bias`, or undefined. Looks in the plane's bucket and the
+ * 15 neighbours on the near side of each rounding boundary, so near-identical planes straddling a
+ * boundary still share a group (rounding alone would split them). Merges re-check planarity exactly.
+ */
+function findGroup(groups: ReadonlyMap<string, Group>, n: Vec3, d: number, bias: number): Group | undefined {
+  const c = bucketOf(n, d);
+  const base = c.map(Math.round);
+  const step = c.map((x, k) => (x >= base[k] ? 1 : -1));
+  for (let mask = 0; mask < 16; mask++) {
+    const g = groups.get(groupKey(base.map((b, k) => (mask & (1 << k) ? b + step[k] : b)), bias));
+    if (g && Math.abs(g.d - d) * D_BUCKET <= 1 && dot(g.normal, n) >= 1 - 1 / (NORMAL_BUCKET * NORMAL_BUCKET)) return g;
+  }
+  return undefined;
 }
 
 /**
@@ -254,6 +293,8 @@ function mergeGroup(group: readonly number[][], pos: readonly Vec3[], normal: Ve
   const parent: number[] = [], lo: number[] = [], hi: number[] = [];
   const d0 = dot(normal, pos[group[0][0]]);
   const byKey = new Map<number, number>();
+  // Directed edges used by more than one face (non-manifold or flipped faces): their twin is ambiguous, so never merge across them.
+  const shared = new Set<number>();
   group.forEach((p, li) => {
     parent.push(li);
     let l = Infinity, h = -Infinity;
@@ -265,6 +306,7 @@ function mergeGroup(group: readonly number[][], pos: readonly Vec3[], normal: Ve
       const e = base + k, w = p[(k + 1) % p.length];
       from.push(v); to.push(w); owner.push(li);
       next.push(base + (k + 1) % p.length); prev.push(base + (k + p.length - 1) % p.length);
+      if (byKey.has(v * nv + w)) shared.add(v * nv + w);
       byKey.set(v * nv + w, e);
     });
     lo.push(l); hi.push(h);
@@ -279,6 +321,7 @@ function mergeGroup(group: readonly number[][], pos: readonly Vec3[], normal: Ve
   while (queue.length) {
     const h = queue.pop()!;
     if (dead[h]) continue;
+    if (shared.has(from[h] * nv + to[h]) || shared.has(to[h] * nv + from[h])) continue;
     const t = byKey.get(to[h] * nv + from[h]);
     if (t === undefined || dead[t]) continue;
     const rp = root(owner[h]), rq = root(owner[t]);

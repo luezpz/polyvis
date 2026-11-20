@@ -17,7 +17,7 @@ export interface CompileRequest<L> {
 
 export type CompileResponse<D extends Dim> =
   | { readonly id: number; readonly result: CompileResult<D>; readonly ms: number }
-  | { readonly id: number; readonly error: string };
+  | { readonly id: number; readonly error: string; readonly ms: number };
 
 type ClonedBitSet = { readonly size: number; readonly words: Uint32Array };
 

@@ -16,11 +16,12 @@ import { type RowWorker, buildRowsParallel } from "./parallelRows";
 const CHUNKS_PER_WORKER = 8;
 
 /**
- * Minimum ordered portal pairs (n²) per thread. A pair test costs ~70–350 ns (sphere test,
- * sometimes `classifyFacet`; bench), so this is ~20–90 ms of work, well above per-thread setup
- * (graph clone + unpack + spheres, a few ms). Was 2 M: 3D Grid city (3.5 M pairs) got one thread.
+ * Minimum ordered portal pairs (n²) per thread. Since the flat pair test (phase 6a) a pair costs
+ * ~12 ns (bench: 2D Maze 16×16, 2.2 M pairs in 26 ms), so 2 M pairs is ~25 ms per thread, enough to
+ * beat setup and messaging. At 250 k (the pre-6a value) threads never helped and sometimes hurt
+ * (2D Oblique lattice 11 → 19 ms with 4 threads, 2D Maze 26 → 36 ms with 8; 2026-11-20).
  */
-export const MIN_PAIRS_PER_THREAD = 250_000;
+export const MIN_PAIRS_PER_THREAD = 2_000_000;
 
 /**
  * {@link computeBaseVis} spread over up to `workers.length` workers (at least one). Same rows.

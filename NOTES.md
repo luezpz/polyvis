@@ -47,15 +47,21 @@ only decisions, gotchas and open items. The 2D/3D merge (former PLAN.md / PROGRE
   rows back. Base vis and the passage table share one worker protocol (`RowWorker`, `RowJob`,
   `vis/parallelRows.ts`; app `rowPool.ts`/`rowProtocol.ts`); every app runner uses `poolRunner`
   (size check, fallback, `markBroken`), every chunked stage `parallel/workerQueue`. New parallel
-  stages should reuse these rather than add a protocol and pool file each. Threads = n² / `MIN_PAIRS_PER_THREAD` (250 k); under 200 portals,
+  stages should reuse these rather than add a protocol and pool file each. Threads = n² / `MIN_PAIRS_PER_THREAD` (2 M, see below); under 200 portals,
   one thread. Node threads (`npm run bench -- --threads n --repeat 4`), base vis ms 1 → 4 → 8
   threads: 2D Maze 16x16 983 → 359 → 290, 2D Grid city 238 → 75 → 69, 3D Grid city 636 → 262 →
   164, 3D Pillar forest 175 → 81 → 72; levels under ~550 portals unchanged (stay local).
-  Those numbers predate the flat pair test (phase 6a, 5–12× cheaper pairs): `MIN_PAIRS_PER_THREAD` is
-  likely too low now (the flood and messaging dominate); re-measure with `--threads` before trusting it.
+  Those numbers predate the flat pair test (phase 6a, 5–12× cheaper pairs). Re-measured 2026-11-20
+  (`--threads 1/4/8 --repeat 3`): base vis is now <= 26 ms on every bench level and threads never helped
+  (sometimes hurt), so `MIN_PAIRS_PER_THREAD` is 2 M (~25 ms per thread); only far bigger levels go parallel.
   Rows are copied out of the packed buffer (`baseVisFromWords`): views would each clone the
   whole buffer when the result is posted to the editor.
 - Editors share one nested pool (`shared/app/compile/workerPool.ts`, entry `poolWorker.ts`).
+  Only a dead pool worker (`PoolWorkerError`) disables the pool; a stage that throws inside a live
+  worker just falls back to one thread for that call (it would throw on any thread).
+- `CompileClient` abandons an in-flight compile older than `cancelAfterMs` (1 s) when a newer request
+  arrives: it terminates and respawns the worker (and so its nested pool). Fresh compiles are never
+  cancelled, so brush drags don't respawn workers on every move.
 - Levels: `SAMPLE_LEVELS` (basic, used by every test suite) vs `DEMO_LEVELS` (`level/demos.ts`,
   grouped Heavy / Worst case / Edge case; only the cheap ones are tested, in `tests/d*/demos.test.ts`).
   Editors list `ALL_LEVELS` via `levelSelect` (optgroups). Writing helpers live in `level/builder.ts`;

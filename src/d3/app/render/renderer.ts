@@ -450,5 +450,11 @@ function runtimeVisible(result: CompileResult, probe: Probe, rect: boolean, clos
 function runtimeKey(probe: Probe | null, on: boolean): number[] {
   if (!probe || !on) return [];
   const { point: p, view: v } = probe;
-  return [p.x, p.y, p.z, ...(v ? [v.forward.x, v.forward.y, v.forward.z, ...v.rect!.max] : [])];
+  if (!v) return [p.x, p.y, p.z, 0];
+  // Everything `visibleLeaves` reads from the view: forward, axes and the rect (optional).
+  const key = [p.x, p.y, p.z, 1, v.forward.x, v.forward.y, v.forward.z];
+  for (const a of v.axes) key.push(a.x, a.y, a.z);
+  if (v.rect) key.push(1, ...v.rect.min, ...v.rect.max);
+  else key.push(0);
+  return key;
 }
