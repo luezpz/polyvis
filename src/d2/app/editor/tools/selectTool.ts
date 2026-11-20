@@ -7,8 +7,9 @@
  * - Drag a brush to move it.
  * - Drag a vertex handle (dot) of the selected brush to reshape it (re-hulled,
  *   so it stays convex); drag an edge handle (square at an edge midpoint) to
- *   push/pull that edge along its normal (3D face push/pull analogue).
- * - Delete/Backspace deletes, Ctrl+D duplicates, Esc deselects.
+ *   push/pull that edge along its normal (3D face push/pull analogue). Clicking
+ *   an edge handle also selects that edge (its split bias is edited in the panel).
+ * - Delete/Backspace deletes, Ctrl+D duplicates, Esc deselects (edge first).
  */
 
 import { type Brush, type Vec2, dot, lineFromPoints, midpoint, sub } from "../../../core";
@@ -28,7 +29,7 @@ export class SelectTool implements Tool {
   readonly id = "select" as const;
   readonly label = "Select";
   readonly shortcut = "v";
-  readonly hint = "Click to select (again to cycle) · drag to move · drag dots to reshape, squares to push/pull edges · Del · Ctrl+D";
+  readonly hint = "Click to select (again to cycle) · drag to move · drag dots to reshape, squares to select / push/pull edges · Del · Ctrl+D";
   readonly cursor = "default";
 
   private drag: Drag | null = null;
@@ -57,6 +58,7 @@ export class SelectTool implements Tool {
       const ei = edgeHandleAt(selected, p.world, camera.pixels(HANDLE_PX));
       const outward = ei >= 0 ? edgeOutward(selected, ei) : null;
       if (outward) {
+        model.selectFace(ei);
         model.beginGesture();
         this.drag = { kind: "edge", brush: selected, index: ei, start: p.world, outward };
         return;
@@ -124,7 +126,8 @@ export class SelectTool implements Tool {
       return true;
     }
     if (e.key === "Escape") {
-      model.select(null);
+      if (model.selectedFace >= 0) model.selectFace(-1);
+      else model.select(null);
       return true;
     }
     return false;
@@ -139,10 +142,13 @@ export class SelectTool implements Tool {
     const vs = sel.vertices;
     // The dragged brush is re-hulled every move, so edge indices are only stable on the original.
     const activeEdge = this.drag?.kind === "edge" ? -1 : this.hoverEdge;
+    const picked = this.drag ? -1 : model.selectedFace;
     vs.forEach((a, i) => {
       const b = vs[(i + 1) % vs.length];
       const hot = i === activeEdge;
       if (hot) painter.line(a, b, { color: COLORS.handleHot, width: 2.5 });
+      else if (i === picked) painter.line(a, b, { color: COLORS.faceSelected, width: 2.5 });
+      else if ((sel.faceSplitBias?.[i] ?? 0) !== 0) painter.line(a, b, { color: COLORS.hintFace, width: 2 });
       painter.square(midpoint(a, b), hot ? 5 : 4, hot ? COLORS.handleHot : COLORS.handleFill, { color: COLORS.selection, width: 1.5 });
     });
     for (const v of vs) painter.dot(v, 4, COLORS.handleFill, { color: COLORS.selection, width: 1.5 });

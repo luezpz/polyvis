@@ -40,6 +40,10 @@ export const CSS_COLORS = {
   handle: "#14161a",
   handleStroke: "#ffffff",
   handleHot: "#ffd23f",
+  /** Face picked for editing (split bias). */
+  faceSelected: "#3fe0ff",
+  /** Face with a nonzero split bias (hint face). */
+  hintFace: "#c77dff",
   rayOk: "rgba(90, 220, 120, 0.9)",
   rayBad: "#ff3b3b",
 } as const;

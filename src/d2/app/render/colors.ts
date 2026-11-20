@@ -30,6 +30,10 @@ export const COLORS = {
   hover: "rgba(255, 255, 255, 0.5)",
   handleFill: "#14161a",
   handleHot: "#ffd23f",
+  /** Edge picked for editing (split bias). */
+  faceSelected: "#3fe0ff",
+  /** Edge with a nonzero split bias (hint edge). */
+  hintFace: "#c77dff",
   surface: "rgba(232, 232, 232, 0.9)",
   surfaceCurrent: "#5adc78",
   surfaceVisible: "#a8f0b8",

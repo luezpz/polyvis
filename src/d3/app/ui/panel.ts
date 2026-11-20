@@ -12,7 +12,7 @@ import type { EditorModel } from "../editor/model";
 import { type Layers, LAYER_LABELS, type ViewState } from "../editor/viewState";
 import type { Tool, ToolId } from "../editor/tools/tool";
 import { h } from "../../../shared/app/ui/dom";
-import { checkbox, doorNameInput, kv, levelSelect, numberInput, section } from "../../../shared/app/ui/widgets";
+import { checkbox, doorNameInput, kv, levelSelect, numberInput, section, splitBiasField } from "../../../shared/app/ui/widgets";
 import { compilerOptionsSection, exportButtons, probeRows, statsRows } from "../../../shared/app/ui/compileSections";
 
 /** What the panel needs from the application. */
@@ -152,7 +152,7 @@ export class Panel {
     this.fromCameraBox.checked = view.inspect.fromCamera;
     // Rebuild read-outs only when their inputs change (update() runs every frame while flying).
     const r = this.host.compiled();
-    if (this.changed("selection", [model.selectedBrush, view.gridSize])) this.renderSelection();
+    if (this.changed("selection", [model.selectedBrush, model.selectedFace, view.gridSize])) this.renderSelection();
     if (this.changed("meshes", [model.level.meshes])) this.renderMeshes();
     if (this.changed("stats", [r, this.host.compileError(), this.host.compiling, model.level])) this.renderStats();
     if (this.changed("probe", [r, view.inspect.point, view.inspect.pinned, view.inspect.portal])) this.renderProbe(view);
@@ -177,6 +177,7 @@ export class Panel {
     const f = (v: number) => +v.toFixed(3);
     const { min, max } = b.bounds;
     const g = view.gridSize > 0 ? view.gridSize : 1;
+    const fi = model.selectedFace;
     this.selectionBox.replaceChildren(
       kv("Brush", `#${b.id} (${b.kind}${b.kind === "solid" && b.detail ? ", detail" : ""}${b.kind === "solid" && b.door ? `, door "${b.door}"` : ""})`),
       kv("Faces / volume", `${b.faces.length} / ${f(brushVolume(b))}`),
@@ -191,6 +192,10 @@ export class Panel {
         h("button", { class: "danger", onclick: () => model.removeBrush(b.id) }, "Delete"),
       ),
       ...(b.kind === "solid" && b.door ? [doorNameInput(b.door, (name) => model.setDoor(b.id, name))] : []),
+      kv("Hint faces", String(b.faceSplitBias?.filter((v) => v !== 0).length ?? 0)),
+      fi >= 0
+        ? splitBiasField(`Face ${fi}`, b.faceSplitBias?.[fi] ?? 0, (v) => model.setFaceSplitBias(b.id, fi, v))
+        : h("span", { class: "muted" }, "Click a face handle to edit its split bias"),
     );
   }
 

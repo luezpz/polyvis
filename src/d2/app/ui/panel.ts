@@ -9,7 +9,7 @@ import type { EditorModel } from "../editor/model";
 import { type Layers, LAYER_LABELS, type ViewState } from "../editor/viewState";
 import type { Tool, ToolId } from "../editor/tools/tool";
 import { h } from "../../../shared/app/ui/dom";
-import { checkbox, doorNameInput, kv, levelSelect, section } from "../../../shared/app/ui/widgets";
+import { checkbox, doorNameInput, kv, levelSelect, section, splitBiasField } from "../../../shared/app/ui/widgets";
 import { compilerOptionsSection, exportButtons, probeRows, statsRows } from "../../../shared/app/ui/compileSections";
 
 /** What the panel needs from the application. */
@@ -125,6 +125,7 @@ export class Panel {
   private renderSelection(): void {
     const { model } = this.host;
     const b = model.selectedBrush;
+    const fi = model.selectedFace;
     if (!b) {
       this.selectionBox.replaceChildren(h("span", { class: "muted" }, "Nothing selected"));
       return;
@@ -141,6 +142,10 @@ export class Panel {
         h("button", { class: "danger", onclick: () => model.removeBrush(b.id) }, "Delete"),
       ),
       ...(b.kind === "solid" && b.door ? [doorNameInput(b.door, (name) => model.updateBrush(b.id, { door: name }))] : []),
+      kv("Hint edges", String(b.faceSplitBias?.filter((v) => v !== 0).length ?? 0)),
+      fi >= 0
+        ? splitBiasField(`Edge ${fi}`, b.faceSplitBias?.[fi] ?? 0, (v) => model.setFaceSplitBias(b.id, fi, v))
+        : h("span", { class: "muted" }, "Click an edge handle to edit its split bias"),
     );
   }
 

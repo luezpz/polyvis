@@ -8,7 +8,7 @@
 
 import {
   type Brush, type BrushKind, type Level, type ObjImportResult, type Point2, type Vec3,
-  emptyLevel, makeBoxBrush, makeBrush, objDoorBrushes, objMesh, makePrismBrush, moveBrushFace, nextBrushId, nextMeshId, translateBrush, withDetail, withDoor, withFlags,
+  emptyLevel, makeBoxBrush, makeBrush, objDoorBrushes, objMesh, makePrismBrush, moveBrushFace, nextBrushId, nextMeshId, translateBrush, withDetail, withDoor, withFlags, withSplitBias,
 } from "../../core";
 import { History } from "../../../shared/app/editor/history";
 
@@ -18,6 +18,7 @@ type Listener = (change: ModelChange) => void;
 export class EditorModel {
   private _level: Level = emptyLevel();
   private _selectedId: number | null = null;
+  private _selectedFace = -1;
   private gestureStart: Level | null = null;
   private readonly history = new History<Level>();
   private readonly listeners = new Set<Listener>();
@@ -35,6 +36,12 @@ export class EditorModel {
 
   get selectedBrush(): Brush | null {
     return this._level.brushes.find((b) => b.id === this._selectedId) ?? null;
+  }
+
+  /** Face (plane index) of the selected brush picked for editing (split bias), or -1. Always in range. */
+  get selectedFace(): number {
+    const b = this.selectedBrush;
+    return b && this._selectedFace < b.faces.length ? this._selectedFace : -1;
   }
 
   get canUndo(): boolean {
@@ -60,13 +67,23 @@ export class EditorModel {
     else this.history.clear();
     this._level = level;
     this._selectedId = null;
+    this._selectedFace = -1;
     this.emit("level");
     this.emit("selection");
   }
 
+  /** Selects a brush (or none); clears the face selection when the brush changes. */
   select(id: number | null): void {
     if (id === this._selectedId) return;
     this._selectedId = id;
+    this._selectedFace = -1;
+    this.emit("selection");
+  }
+
+  /** Selects face `index` (plane index) of the selected brush, or none (-1). */
+  selectFace(index: number): void {
+    if (index === this._selectedFace) return;
+    this._selectedFace = index;
     this.emit("selection");
   }
 
@@ -129,6 +146,18 @@ export class EditorModel {
   /** Makes a solid brush a door named `name` (phase 4b), or not a door (`null` / empty). */
   setDoor(id: number, name: string | null): void {
     this.replaceBrush(id, (b) => withDoor(b, name || undefined));
+  }
+
+  /**
+   * Sets the BSP splitter bias (phase 3d hint faces) of face `index`: negative = preferred splitter,
+   * positive = avoided, 0 = plain. Non-finite values are ignored.
+   */
+  setFaceSplitBias(id: number, index: number, bias: number): void {
+    if (!Number.isFinite(bias)) return;
+    this.replaceBrush(id, (b) => {
+      if (index < 0 || index >= b.planes.length || (b.faceSplitBias?.[index] ?? 0) === bias) return null;
+      return withSplitBias(b, b.planes.map((_, i) => (i === index ? bias : b.faceSplitBias?.[i] ?? 0)));
+    });
   }
 
   /** Moves a brush to `original` translated by `delta` (gesture-friendly: always relative to the original). */

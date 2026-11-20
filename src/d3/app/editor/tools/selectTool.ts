@@ -6,8 +6,9 @@
  *   larger one, so rooms behind pillars stay reachable).
  * - Drag a brush to move it horizontally; hold Shift to move it vertically.
  * - Drag a face handle (square at a face centre) of the selected brush to push
- *   or pull that face along its normal; works for any convex brush.
- * - Delete/Backspace deletes, Ctrl+D duplicates, Esc deselects.
+ *   or pull that face along its normal; works for any convex brush. Clicking a
+ *   handle also selects that face (its split bias is edited in the panel).
+ * - Delete/Backspace deletes, Ctrl+D duplicates, Esc deselects (face first).
  */
 
 import { type Brush, type Vec3, sub, windingCenter } from "../../../core";
@@ -27,7 +28,7 @@ export class SelectTool implements Tool {
   readonly id = "select" as const;
   readonly label = "Select";
   readonly shortcut = "v";
-  readonly hint = "Click to select (again to cycle) · drag to move, Shift+drag vertical · drag face handles to push/pull · Del · Ctrl+D";
+  readonly hint = "Click to select (again to cycle) · drag to move, Shift+drag vertical · click/drag face handles to select, push/pull · Del · Ctrl+D";
   readonly cursor = "default";
 
   private drag: Drag | null = null;
@@ -51,6 +52,7 @@ export class SelectTool implements Tool {
       if (index >= 0) {
         const face = selected.faces[index];
         const center = windingCenter(face.winding);
+        model.selectFace(index);
         const t0 = closestOnLine(p.ray, center, face.plane.n);
         if (t0 !== null) {
           model.beginGesture();
@@ -128,7 +130,8 @@ export class SelectTool implements Tool {
       return true;
     }
     if (e.key === "Escape") {
-      model.select(null);
+      if (model.selectedFace >= 0) model.selectFace(-1);
+      else model.select(null);
       return true;
     }
     return false;
@@ -141,9 +144,12 @@ export class SelectTool implements Tool {
     const sel = model.selectedBrush;
     if (!sel) return;
     const activeFace = this.drag?.kind === "face" ? this.drag.index : this.hoverFace;
+    const picked = model.selectedFace;
     sel.faces.forEach((f, i) => {
       const hot = i === activeFace;
       if (hot) o.loop(f.winding, { color: CSS_COLORS.handleHot, width: 2.5 });
+      else if (i === picked) o.loop(f.winding, { color: CSS_COLORS.faceSelected, width: 2.5 });
+      else if ((sel.faceSplitBias?.[i] ?? 0) !== 0) o.loop(f.winding, { color: CSS_COLORS.hintFace, width: 1.5 });
       o.square(windingCenter(f.winding), hot ? 5 : 4, hot ? CSS_COLORS.handleHot : CSS_COLORS.handle, { color: CSS_COLORS.handleStroke, width: 1.5 });
     });
   }

@@ -6,7 +6,7 @@
  * {@link EditorModel.endGesture} so a whole drag becomes one undo step.
  */
 
-import { type Brush, type BrushKind, type Level, type Vec2, emptyLevel, makeBrush, moveBrushEdge, nextBrushId, withFlags } from "../../core";
+import { type Brush, type BrushKind, type Level, type Vec2, emptyLevel, makeBrush, moveBrushEdge, nextBrushId, withFlags, withSplitBias } from "../../core";
 import { History } from "../../../shared/app/editor/history";
 
 export type ModelChange = "level" | "selection";
@@ -15,6 +15,7 @@ type Listener = (change: ModelChange) => void;
 export class EditorModel {
   private _level: Level = emptyLevel();
   private _selectedId: number | null = null;
+  private _selectedFace = -1;
   private gestureStart: Level | null = null;
   private readonly history = new History<Level>();
   private readonly listeners = new Set<Listener>();
@@ -32,6 +33,12 @@ export class EditorModel {
 
   get selectedBrush(): Brush | null {
     return this._level.brushes.find((b) => b.id === this._selectedId) ?? null;
+  }
+
+  /** Edge (`vertices[i] → vertices[i+1]`) of the selected brush picked for editing (split bias), or -1. Always in range. */
+  get selectedFace(): number {
+    const b = this.selectedBrush;
+    return b && this._selectedFace < b.vertices.length ? this._selectedFace : -1;
   }
 
   get canUndo(): boolean {
@@ -57,14 +64,36 @@ export class EditorModel {
     else this.history.clear();
     this._level = level;
     this._selectedId = null;
+    this._selectedFace = -1;
     this.emit("level");
     this.emit("selection");
   }
 
+  /** Selects a brush (or none); clears the edge selection when the brush changes. */
   select(id: number | null): void {
     if (id === this._selectedId) return;
     this._selectedId = id;
+    this._selectedFace = -1;
     this.emit("selection");
+  }
+
+  /** Selects edge `index` of the selected brush, or none (-1). */
+  selectFace(index: number): void {
+    if (index === this._selectedFace) return;
+    this._selectedFace = index;
+    this.emit("selection");
+  }
+
+  /**
+   * Sets the BSP splitter bias (phase 3d hint faces) of edge `index`: negative = preferred splitter,
+   * positive = avoided, 0 = plain. Non-finite values are ignored.
+   */
+  setFaceSplitBias(id: number, index: number, bias: number): void {
+    if (!Number.isFinite(bias)) return;
+    const b = this._level.brushes.find((x) => x.id === id);
+    if (!b || index < 0 || index >= b.vertices.length || (b.faceSplitBias?.[index] ?? 0) === bias) return;
+    const next = withSplitBias(b, b.vertices.map((_, i) => (i === index ? bias : b.faceSplitBias?.[i] ?? 0)));
+    this.apply({ ...this._level, brushes: this._level.brushes.map((x) => (x === b ? next : x)) });
   }
 
   /** Applies an edit. Inside a gesture, history is recorded once at the end. */
@@ -98,7 +127,8 @@ export class EditorModel {
     const brushes = this._level.brushes.map((b) => {
       if (b.id !== id) return b;
       const next = makeBrush(id, changes.kind ?? b.kind, changes.vertices ?? b.vertices);
-      return next ? withFlags(next, { detail: changes.detail ?? b.detail, door: changes.door === null ? undefined : changes.door ?? b.door }) : b;
+      const door = changes.door === null ? undefined : changes.door ?? b.door;
+      return next ? withFlags(next, { detail: changes.detail ?? b.detail, door, faceSplitBias: b.faceSplitBias, vertices: b.vertices }) : b;
     });
     this.apply({ ...this._level, brushes });
   }
@@ -121,8 +151,12 @@ export class EditorModel {
   duplicateBrush(id: number, offset: Vec2): void {
     const b = this._level.brushes.find((x) => x.id === id);
     if (!b) return;
-    const copy = this.addBrush(b.kind, b.vertices.map((v) => ({ x: v.x + offset.x, y: v.y + offset.y })));
-    if (copy !== null && (b.detail || b.door)) this.updateBrush(copy, { detail: b.detail, door: b.door });
+    // One undo step; detail / door / split biases carry over (a translation keeps edge directions).
+    const moved = makeBrush(nextBrushId(this._level), b.kind, b.vertices.map((v) => ({ x: v.x + offset.x, y: v.y + offset.y })));
+    if (!moved) return;
+    const copy = withFlags(moved, b);
+    this.apply({ ...this._level, brushes: [...this._level.brushes, copy] });
+    this.select(copy.id);
   }
 
   /** Moves a brush to the end (drawn on top / picked first). */

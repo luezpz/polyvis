@@ -69,3 +69,23 @@ export function doorNameInput(value: string, onChange: (name: string) => void): 
   } });
   return h("label", { class: "field", title: "Brushes with the same door name form one door" }, h("span", {}, "Door name"), input);
 }
+
+/** Bias of the BSP's default hint preset (matches the OBJ `hint` material, `OBJ_HINT_BIAS`). */
+const HINT_PRESET = -1000;
+
+/**
+ * Split-bias editor for one face / edge (phase 3d hint faces): a number field plus Hint / Avoid / Clear presets.
+ * `label` names the face (e.g. "Face 3"); `bias` is its current value; `onChange(bias)` sets it
+ * (negative = preferred BSP splitter, positive = avoided, 0 = plain).
+ */
+export function splitBiasField(label: string, bias: number, onChange: (bias: number) => void): HTMLElement {
+  const title = "BSP splitter bias, added to the splitter score: negative prefers this plane as a splitter (hint), positive avoids it";
+  return h("div", {},
+    h("label", { class: "field", title }, h("span", {}, `${label} split bias`), numberInput(bias, onChange, -Infinity, 1)),
+    h("div", { class: "button-row" },
+      h("button", { onclick: () => onChange(HINT_PRESET), title: `Bias ${HINT_PRESET}: split along this face first` }, "Hint"),
+      h("button", { onclick: () => onChange(-HINT_PRESET), title: `Bias ${-HINT_PRESET}: avoid splitting along this face` }, "Avoid"),
+      h("button", { onclick: () => onChange(0), disabled: bias === 0 }, "Clear"),
+    ),
+  );
+}

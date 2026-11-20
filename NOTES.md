@@ -128,8 +128,9 @@ only decisions, gotchas and open items. The 2D/3D merge (former PLAN.md / PROGRE
   supporting face planes, so a door mesh must be convex (a slab); one with no bounded volume is skipped and reported.
 - Phase 3d hint faces = per-face splitter bias (`Brush.faceSplitBias` → `Wall.splitBias` → `BuildContext.planeBias`
   → `splitterScore`), not extra hint brushes. A plane takes the lowest nonzero vote of its walls. Builder specs
-  give it in face order (3D box −x, +x, −y, +y, −z, +z; 2D box −y, +x, +y, −x); edits carry it by normal. No
-  editor UI. OBJ (3D only): material `hint` (bias `OBJ_HINT_BIAS` = −1000) or `hint_<n>` (bias n) →
+  give it in face order (3D box −x, +x, −y, +y, −z, +z; 2D box −y, +x, +y, −x); edits carry it by normal. Editor
+  UI (both): clicking a face / edge handle in the Select tool selects it (`EditorModel.selectedFace`, reset on brush
+  change); the panel's `splitBiasField` sets it via `setFaceSplitBias` (Hint −1000 / Avoid +1000 / Clear presets). OBJ (3D only): material `hint` (bias `OBJ_HINT_BIAS` = −1000) or `hint_<n>` (bias n) →
   `ImportedMesh.faceSplitBias` → mesh walls; hint faces never merge with plain coplanar faces on import.
   Blender's `.001` name suffixes are ignored for both `hint` and `door_`.
 - No PAS (decided 2026-11-19): it is a bake-time artifact (can't be rebuilt on map load) and adds little.
@@ -174,7 +175,7 @@ only decisions, gotchas and open items. The 2D/3D merge (former PLAN.md / PROGRE
   tune `MAX_BATCH` / `MIN_PARALLEL_PORTALS` / `MIN_PARALLEL_WALLS` / `MAX_BSP_THREADS`.
 - Parallel base vis never run in a browser: confirm the speed-up there (Node numbers in Decisions).
 - Doors: door state in the export beyond the `closed` flag (door → portal list; export plan).
-- Hint faces: editor UI to set a face's bias; hints in open space
+- Hint faces: hints in open space
   (non-solid splitter-only walls) if a level needs a cut no face lies on.
 - Open decision: merge the two editor shells (panel/app) further, or keep sharing helpers only.
 - Convex hulls generation (for physics engines, navmesh, etc.)
