@@ -91,7 +91,11 @@ export function makeWall(winding: Winding, sourceId = -1, known?: Plane3, splitB
  */
 export function buildDetailWalls(brushes: readonly Brush[]): Wall[] {
   const detail = new Set(brushes.filter((b) => !isStructural(b)).map((b) => b.id));
-  return detail.size ? buildWalls(brushes).filter((w) => detail.has(w.sourceId)) : [];
+  if (!detail.size) return [];
+  // Detail brushes first: where a detail face coincides with a room face (a door or pillar flush with
+  // the mouth of a hallway), dedupe keeps the first wall, and that must be the detail one or its face vanishes.
+  const ordered = [...brushes.filter((b) => detail.has(b.id)), ...brushes.filter((b) => !detail.has(b.id))];
+  return buildWalls(ordered).filter((w) => detail.has(w.sourceId));
 }
 
 /** Computes the walls of the CSG result of `brushes`. */

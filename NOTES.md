@@ -72,7 +72,9 @@ only decisions, gotchas and open items. The 2D/3D merge (former PLAN.md / PROGRE
   structural brushes only (`isStructural`), and `buildDetailWalls` takes the CSG of **all**
   brushes and keeps the detail brushes' faces (`CompileResult.detailWalls`: trimmed, drawn,
   never in the BSP). Rejected: one full CSG with detail faces dropped. That leaves holes in
-  structural faces (the floor under a pillar) and the BSP leaks. Detail brushes never occlude
+  structural faces (the floor under a pillar) and the BSP leaks. Gotcha: that full CSG lists detail/door
+  brushes first, since dedupe keeps the first of coincident walls (a face flush with a hallway mouth
+  otherwise vanishes); 2D also never welds a detail wall to another brush's. Detail brushes never occlude
   (the PVS only grows, so it stays conservative). Non-cutting yet occluding is impossible: a
   solid-leaf BSP has only solid/empty leaves, and portal flow sees only BSP walls. The flag is
   ignored on rooms: a detail room would remove empty space. TODO: export `detailWalls` with

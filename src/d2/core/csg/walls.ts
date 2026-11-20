@@ -84,11 +84,23 @@ export function makeWall(seg: Segment, sourceId = -1, splitBias = 0): Wall | nul
  */
 export function buildDetailWalls(brushes: readonly Brush[]): Wall[] {
   const detail = new Set(brushes.filter((b) => !isStructural(b)).map((b) => b.id));
-  return detail.size ? buildWalls(brushes).filter((w) => detail.has(w.sourceId)) : [];
+  if (!detail.size) return [];
+  // Detail brushes first: where a detail face coincides with a room face (a door or pillar flush with
+  // the mouth of a hallway), dedupe keeps the first wall, and that must be the detail one or its face vanishes.
+  const ordered = [...brushes.filter((b) => detail.has(b.id)), ...brushes.filter((b) => !detail.has(b.id))];
+  return csgWalls(ordered, detail).filter((w) => detail.has(w.sourceId));
 }
 
 /** Computes the walls of the CSG result of `brushes`. */
 export function buildWalls(brushes: readonly Brush[]): Wall[] {
+  return csgWalls(brushes);
+}
+
+/**
+ * {@link buildWalls} with `keepApart`: brush ids whose walls are never welded to other brushes' walls
+ * (so a detail wall is not absorbed into a collinear room wall).
+ */
+function csgWalls(brushes: readonly Brush[], keepApart?: ReadonlySet<number>): Wall[] {
   const isEmpty = makeEmptySpaceTest(brushes);
   const index = indexBrushes(brushes);
   const pieces: Wall[] = [];
@@ -105,7 +117,7 @@ export function buildWalls(brushes: readonly Brush[]): Wall[] {
       }
     }
   }
-  return mergeCollinear(dedupe(pieces));
+  return mergeCollinear(dedupe(pieces), keepApart);
 }
 
 /** Splits an edge at all intersections with other brushes' edges and vertices (`brushes`: candidates, may include `owner`). */
@@ -175,8 +187,8 @@ function dedupe(walls: readonly Wall[]): Wall[] {
   return [...kept.values()];
 }
 
-/** Welds chains of collinear, same-direction walls that touch end-to-start. */
-function mergeCollinear(walls: readonly Wall[]): Wall[] {
+/** Welds chains of collinear, same-direction walls that touch end-to-start (`keepApart`: see {@link buildWalls}). */
+function mergeCollinear(walls: readonly Wall[], keepApart?: ReadonlySet<number>): Wall[] {
   const byStart = new Map<string, number[]>();
   const byEnd = new Map<string, number[]>();
   walls.forEach((w, i) => {
@@ -184,7 +196,8 @@ function mergeCollinear(walls: readonly Wall[]): Wall[] {
     push(byEnd, pointKey(w.winding.b), i);
   });
   const used = new Uint8Array(walls.length);
-  const collinear = (i: number, j: number) => dot(walls[i].plane.n, walls[j].plane.n) > 1 - NORMAL_EPSILON;
+  const apart = (i: number, j: number) => !!keepApart && walls[i].sourceId !== walls[j].sourceId && (keepApart.has(walls[i].sourceId) || keepApart.has(walls[j].sourceId));
+  const collinear = (i: number, j: number) => !apart(i, j) && dot(walls[i].plane.n, walls[j].plane.n) > 1 - NORMAL_EPSILON;
 
   const out: Wall[] = [];
   for (let i = 0; i < walls.length; i++) {

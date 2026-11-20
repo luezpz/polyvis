@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { DEMO_LEVELS, compileLevel, locateLeaf, moveBrushEdge, parseLevel, serializeLevel, withDetail } from "../../src/d2/core";
+import { type Brush, buildDetailWalls, makeBoxBrush, withDoor } from "../../src/d2/core";
 
 const level = (name: string) => DEMO_LEVELS.find((s) => s.name === name)!.create();
 
@@ -39,4 +40,25 @@ describe("detail brushes (2D)", () => {
     expect(moveBrushEdge(pillar, 0, 0.5)?.detail).toBe(true);
     expect("detail" in withDetail(pillar, false)).toBe(false);
   });
+});
+
+describe("detail and door faces flush with a hallway mouth (2D)", () => {
+  // Room (0..10)², hallway x 10..20, y 4..6, a solid block filling the hallway's first unit. Its x = 10 face
+  // coincides with the room's wall across the mouth; it used to be deduped / welded into the room's wall.
+  const brushes = (mark: (b: Brush) => Brush) => [
+    makeBoxBrush(1, "room", { x: 0, y: 0 }, { x: 10, y: 10 })!,
+    makeBoxBrush(2, "room", { x: 10, y: 4 }, { x: 20, y: 6 })!,
+    mark(makeBoxBrush(3, "solid", { x: 10, y: 4 }, { x: 11, y: 6 })!),
+  ];
+  const length = (ws: readonly { winding: { a: { x: number; y: number }; b: { x: number; y: number } } }[]) =>
+    ws.reduce((s, { winding: { a, b } }) => s + Math.sqrt((b.x - a.x) * (b.x - a.x) + (b.y - a.y) * (b.y - a.y)), 0);
+
+  for (const [name, mark] of [["detail", (b: Brush) => withDetail(b, true)], ["door", (b: Brush) => withDoor(b, "d")]] as const) {
+    it(`keeps both exposed faces of a ${name} brush`, () => {
+      const ws = buildDetailWalls(brushes(mark));
+      expect(ws.every((w) => w.sourceId === 3)).toBe(true);
+      expect(length(ws)).toBeCloseTo(4, 6); // x = 10 and x = 11, 2 each
+      expect(ws.some((w) => w.plane.n.x < -0.99 && Math.abs(w.winding.a.x - 10) < 1e-6)).toBe(true);
+    });
+  }
 });
